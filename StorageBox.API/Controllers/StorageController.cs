@@ -48,7 +48,7 @@ namespace StorageBox.API.Controllers
         /// </summary>
         /// <param name="model"></param>
         /// <returns></returns>
-        [Route("SubmitFile"), HttpPost, ProtectBySession]
+        [Route("SubmitFile"), HttpPost]
         public Models.UploadServiceResponse SubmitFile(Models.UploadFileModel model)
         {
             var response = new Models.UploadServiceResponse();

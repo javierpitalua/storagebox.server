@@ -10,7 +10,8 @@ namespace StorageBox.API.Controllers
     /// <summary>
     /// All requests that require authentication must implement this class
     /// </summary>    
-    public class AuthenticatedBaseController : ApiController
+    [ProtectBySession]
+    public abstract class AuthenticatedBaseController : ApiController
     {
         /// <summary>
         /// If device is authenticated
