@@ -15,7 +15,7 @@ namespace StorageBox.API
     public class ProtectBySessionAttribute : System.Web.Http.Filters.ActionFilterAttribute
     {
         /// <summary>
-        /// 
+        /// By implementing this action all requests to the action/controller must require _sessionID in the header request.
         /// </summary>
         /// <param name="actionContext"></param>
         public override void OnActionExecuting(HttpActionContext actionContext)

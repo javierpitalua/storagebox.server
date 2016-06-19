@@ -488,7 +488,7 @@
         </member>
         <member name="M:StorageBox.API.ProtectBySessionAttribute.OnActionExecuting(System.Web.Http.Controllers.HttpActionContext)">
             <summary>
-            
+            By implementing this action all requests to the action/controller must require _sessionID in the header request.
             </summary>
             <param name="actionContext"></param>
         </member>
