@@ -1,0 +1,59 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".txt" #>
+<#+ 
+	///The following specifies the mapping between column types and properties:
+	private void FillMappings() 
+	{
+		//Use mappings based on MSDN: http://msdn.microsoft.com/en-us/library/cc716729.aspx
+		typeMappingsCSharp = new Dictionary<string, PropertyTypeMapping>()
+			{
+				{"int", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="int", DataType = "Int32" }},
+				{"smallint", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="short", DataType = "Int16" }},
+				{"varchar", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="string", DataType = "String", TreatAsText = true }},
+				{"nvarchar", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="string", DataType = "String", TreatAsText = true }},
+				{"nchar", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="string", DataType = "String", TreatAsText = true }},
+				{"bit", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="bool", DataType = "Boolean" }},
+				{"smalldatetime", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="DateTime", DataType = "DateTime", IsDate = true }},
+				{"date", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="DateTime", DataType = "DateTime", IsDate = true }},
+				{"datetime", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="DateTime", DataType = "DateTime", IsDate = true }},
+				{"text", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="string", DataType = "String", TreatAsText = true }},
+				{"decimal", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="Decimal", DataType = "Decimal" }},
+				{"float", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="Decimal", DataType = "Decimal" }},
+				{"numeric", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="Decimal", DataType = "Decimal" }},
+				{"bigint", new PropertyTypeMapping { IsCLRNullable = true, MappingType ="long", DataType = "Int64" }},
+				{"image", new PropertyTypeMapping { IsCLRNullable = false, MappingType ="byte[]", DataType = "Binary" }}
+			};
+
+		typeMappingsToSQL = new Dictionary<string, string>()
+            {
+                {"System.Int32", "int"},
+                {"System.String", "varchar"},
+                {"System.DateTime", "smalldatetime"},
+                {"System.Boolean", "bit"},
+                {"System.Decimal", "decimal"}
+			};
+	}
+
+	private Dictionary<string, PropertyTypeMapping> typeMappingsCSharp;
+	private Dictionary<string, string> typeMappingsToSQL;
+	
+	public class PropertyTypeMapping
+	{
+		public bool IsCLRNullable { get; set; }
+		public string MappingType { get; set; }        
+        public string DataType { get; set; }
+        public bool	TreatAsText { get; set; }
+        public bool IsDate { get; set; }
+
+        public PropertyTypeMapping ()
+        {
+			IsDate = false;
+			TreatAsText = false;
+        }
+	}
+
+ #>

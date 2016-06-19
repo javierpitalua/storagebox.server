@@ -1,0 +1,421 @@
+﻿<#@ template debug="false" hostSpecific="true" language="C#" #>
+<#@ Assembly Name="System.Core" #>
+<#@ Assembly name="System.Data" #> 
+<#@ assembly name="System.Xml" #> 
+<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Collections" #>
+<#@ import namespace="System.Collections.Generic" #> 
+<#@ import namespace="System.Data" #> 
+<#@ include file="Entities.ttinclude" #>
+<#@ include file="Mappings.SqlServer.ttinclude" #>
+
+<#+ 
+	///This determines if table should be included in code generation based on datasource prefixes filter:
+	public bool IncludeTable (string prefixes, Table table)
+	{
+		bool returnValue = false;
+
+		if (!string.IsNullOrEmpty (prefixes))
+		{
+			foreach(string prefix in prefixes.Split (',')) 
+			{
+				if (table.Name.StartsWith (prefix))
+				{
+					returnValue = true;
+				}
+			}
+		}
+		else 
+		{
+			returnValue = true;
+		}
+
+		return returnValue;
+    }	    
+	 
+	public Project LoadSchemaGenerationProject()
+	{				
+		return LoadProject(this.Host.ResolvePath(Constants.DEFAULT_SCHEMADISCOVERY_XML));
+	}
+
+	public Project LoadSchemaGenerationProject(string fileName)
+    {
+		return LoadProject(this.Host.ResolvePath(fileName));
+	}
+
+	public Project LoadProject(string inputFile)
+	{
+		//First, we need to fill the dictionary of mappings:
+		FillMappings();
+
+		//Now we proceed to read the project hierarchy based on the SchemaDiscovery.xml
+		Project returnValue = new Project();
+		System.Data.DataSet ds = new System.Data.DataSet();
+		ds.ReadXml(inputFile);
+
+		bool isExcluded = false;
+
+		foreach (DataRow drProject in ds.Tables["Project"].Rows)
+		{
+			returnValue.ProjectName = drProject["ProjectName"].ToString();	
+		
+			foreach (DataRow drDataSource in ds.Tables["DataSource"].Select("DataSources_Id = 0"))
+			{
+				DataSource newDataSource = new DataSource()
+				{
+					DataSourceName = drDataSource["DataSourceName"].ToString(),
+					GeneratedNamespace = drDataSource["GeneratedNamespace"].ToString(),
+					ProviderName = drDataSource["ProviderName"].ToString(),
+					ConnectionString = drDataSource["ConnectionString"].ToString(),
+					Project = returnValue				
+				};
+
+				if (ds.Tables["DataSource"].Columns.Contains ("IncludePrefixes"))
+				{
+					newDataSource.IncludePrefixes = drDataSource["IncludePrefixes"].ToString();
+				}
+
+				foreach (DataRow drParentTablesNode in ds.Tables["Tables"].Select(string.Format("DataSource_Id = {0}", drDataSource["DataSource_Id"])))
+				{
+					foreach (DataRow drTable in ds.Tables["Table"].Select(string.Format("Tables_Id = {0} and IgnoreInCodeGeneration='false'", drParentTablesNode["Tables_Id"])))
+					{
+						Table newTable = new Table();
+						newTable.Id = drTable["Table_Id"].ToString();
+						newTable.Name = drTable["Name"].ToString();
+						newTable.Schema = drTable["Schema"].ToString();
+						newTable.Summary = drTable["Summary"].ToString();
+						newTable.ClassName = drTable["ClassName"].ToString();
+						newTable.PluralClassName = drTable["PluralClassName"].ToString();
+						newTable.Scope = drTable["Scope"].ToString();
+						newTable.GeneratePersistentStorage = drTable["GeneratePersistentStorage"].ToString() == "true" ? true : false;
+						newTable.ExposeCRUDToService = drTable["ExposeCRUDMethodsToService"].ToString() == "true" ? true : false;		
+						newTable.DisplayName = drTable["DisplayName"].ToString();
+						newTable.PluralDisplayName = drTable["PluralDisplayName"].ToString();
+						newTable.GenerateIndexController = drTable["GenerateIndexUI"].ToString() == "true" ? true : false;
+						newTable.DisplayAuditInfoInGrids = drTable["DisplayAuditInfoInGrid"].ToString() == "true" ? true : false;
+						newTable.GenerateDetailUI = drTable["GenerateDetailUI"].ToString() == "true" ? true : false;
+						newTable.SupportsMapping = true;
+
+
+						if (newTable.Name.ToLower().EndsWith("map"))
+                        {
+							newTable.GenerateIndexController = false;
+						}
+
+						newTable.DataSource = newDataSource;
+
+						int parentColumnNode = System.Convert.ToInt32(ds.Tables["Columns"].Select(string.Format("Table_Id = {0}", drTable["Table_Id"]))[0]["Columns_Id"].ToString());
+						foreach (DataRow drColumn in ds.Tables["Column"].Select(string.Format("Columns_Id = {0}", parentColumnNode)))
+						{
+							Column newCol = new Column();
+
+							newCol.ColumnName = drColumn["ColumnName"].ToString();
+							newCol.DisplayInGrid = drColumn["DisplayInGrid"].ToString() == "true" ? true : false;
+							newCol.PropertyName = drColumn["PropertyName"].ToString();
+							newCol.SQLType = drColumn["SQLType"].ToString();
+							newCol.CharMaxLength = System.Convert.ToInt32(drColumn["CharMaxLength"].ToString());
+							newCol.NumericPrecision = System.Convert.ToInt32(drColumn["NumericPrecision"].ToString());;
+							newCol.NumericScale = System.Convert.ToInt32(drColumn["NumericScale"].ToString());
+							newCol.IsNullable = drColumn["IsNullable"].ToString() == "true" ? true : false;
+							newCol.IsIdentity = drColumn["IsIdentity"].ToString() == "true" ? true : false;
+							newCol.Summary = drColumn["Summary"].ToString();
+							newCol.Table = newTable;
+							newCol.DisplayName = drColumn["DisplayName"].ToString();			
+							newCol.Width = System.Convert.ToInt32(drColumn["GridWidth"].ToString());							
+
+							newTable.Columns.Add(newCol);
+						}
+
+						isExcluded = false;
+						//determine is the table name should be excluded:
+						foreach (string tName in this.ExcludeList)
+                        {
+							if (newTable.Name.ToLower() == tName.ToLower())
+                            {
+								isExcluded = true;								
+							}
+						}
+
+						if (IncludeList.Count > 0)
+						{
+							if (this.IncludeList.Contains(newTable.Name))
+                            {
+								isExcluded = false;
+							}
+							else 
+							{
+								isExcluded = true;
+							}
+						}
+
+						if (IncludeTable(newDataSource.IncludePrefixes, newTable))
+						{
+							if (isExcluded == false)
+                            {
+								//if everything ok, then add the table:
+								newDataSource.Tables.Add(newTable);
+							}							
+						}
+
+						foreach (DataRow drKey in ds.Tables["Keys"].Select(string.Format("Table_Id = {0}", newTable.Id)))
+                        {
+							foreach(DataRow drTableKey in ds.Tables["TableKey"].Select(string.Format(@"Keys_Id = {0} and KeyType = 'Index'", drKey["Keys_Id"])))
+                            {
+								TableIndex newIndex = new TableIndex();
+								newIndex.IndexName = drTableKey["Name"].ToString();
+
+								foreach(DataRow drIndexColumns in ds.Tables["Columns"].Select(string.Format("TableKey_Id = {0}", drTableKey["TableKey_Id"])))
+                                {
+									foreach(DataRow drKeyColumn in ds.Tables["KeyColumn"].Select(string.Format("Columns_Id = {0}", drIndexColumns["Columns_Id"])))
+                                    {
+										IndexColumn newIndexCol = new IndexColumn();
+                                        
+										newIndexCol.ColumnName = drKeyColumn["ColumnName"].ToString();
+										newIndexCol.Direction = drKeyColumn["SortDirection"].ToString() == "Ascending" ? SortDirection.Ascending : SortDirection.Descending;
+
+										newIndex.Columns.Add (newIndexCol);
+									}
+								}
+
+								newTable.Indexes.Add(newIndex);
+							}
+						}
+					}
+				}
+
+                this.PopulateStoredProcedureList(newDataSource, ds, drDataSource);
+				
+				returnValue.DataSources.Add(newDataSource);
+
+				//Now we find foreign relationships:
+				foreach (Table table in newDataSource.Tables)
+                {
+					FixBelongsToRelationships(table);
+					FixHasManyRelationships(table);
+
+					table.SupportsMapping = this.DetermineIfSupportsMapping(table);
+				}
+			}
+		}
+
+		return returnValue;
+	}
+
+	#region 
+	public bool DetermineIfSupportsMapping(Table table)
+    {
+		return true;
+	}
+	#endregion 
+
+	#region PopulateStoredProcedureList()
+	private void PopulateStoredProcedureList(DataSource newDataSource, DataSet ds, DataRow drDataSource)
+    {
+		if (ds.Tables.Contains("StoredProcedures")) // does xml contains any sp information?
+        {
+            foreach (DataRow drParentStoredProcsNode in ds.Tables["StoredProcedures"].Select(string.Format("DataSource_Id = {0}", drDataSource["DataSource_Id"])))
+            {
+				foreach (DataRow drProc in ds.Tables["StoredProcedure"].Select(string.Format("StoredProcedures_Id = {0} and IgnoreInCodeGeneration='false'", drParentStoredProcsNode["StoredProcedures_Id"])))
+                {
+					StoredProcedure newProc = new StoredProcedure();
+						
+					newProc.Name = drProc["Name"].ToString();
+					newProc.SchemaName = drProc["Schema"].ToString();
+					newProc.CodeDefinition = drProc["CodeDefinition"].ToString();
+					newProc.DataSource = newDataSource;
+						
+					foreach(DataRow drParentParam in ds.Tables["Parameters"].Select(string.Format ("StoredProcedure_Id = {0}", drProc["StoredProcedure_Id"].ToString())))
+                    {
+						foreach (DataRow drParam in ds.Tables["StoredProcedureParameter"].Select(string.Format("Parameters_Id = {0}", drParentParam["Parameters_Id"].ToString())))
+                        {
+							StoredProcedureParameter newParam = new StoredProcedureParameter();
+
+							newParam.ParameterName = drParam["ParameterName"].ToString();
+							newParam.CharMaxLength = System.Convert.ToInt32(drParam["CharMaxLength"].ToString());
+							newParam.SQLType = drParam["SQLType"].ToString();
+							newParam.Procedure = newProc;
+
+							newProc.Parameters.Add(newParam);
+						}
+					}
+
+					foreach(DataRow drParentParam in ds.Tables["ReturnedColumns"].Select(string.Format ("StoredProcedure_Id = {0}", drProc["StoredProcedure_Id"].ToString())))
+                    {
+						foreach (DataRow drColumn in ds.Tables["Column"].Select(string.Format("ReturnedColumns_Id = {0}", drParentParam["ReturnedColumns_Id"].ToString())))
+                        {
+							Column newCol = new Column()
+							{
+								ColumnName = drColumn["ColumnName"].ToString(),
+								PropertyName = drColumn["PropertyName"].ToString(),
+								SQLType = drColumn["SQLType"].ToString(),
+								CharMaxLength = System.Convert.ToInt32(drColumn["CharMaxLength"].ToString()),
+								IsNullable = true,
+								IsIdentity = drColumn["ColumnName"].ToString().ToLower() == "id" ? true : false,
+								Summary = drColumn["Summary"].ToString(),				
+							    DisplayInGrid = drColumn["DisplayInGrid"].ToString() == "true" ? true : false,											
+								DisplayName = drColumn["DisplayName"].ToString(),
+							    Width = System.Convert.ToInt32(drColumn["GridWidth"].ToString())
+							};
+
+							if (this.typeMappingsToSQL.ContainsKey(newCol.SQLType))
+                            {
+								newCol.SQLType = this.typeMappingsToSQL[newCol.SQLType];
+							}
+
+							if(newCol.ColumnName.ToLower() == "id")
+                            {
+                                newCol.IsNullable = false;
+								newCol.IsIdentity = true;
+							}
+
+							newProc.ReturnedColumns.Add(newCol);
+						}
+					}
+
+					newDataSource.Procedures.Add(newProc);
+				}
+			}
+        }					
+	}
+
+	#endregion	
+
+	//Looks for foreign relationships 
+	private void FixBelongsToRelationships (Table table)
+    {
+		foreach (Column col in table.Columns)
+        {
+			if (col.PropertyName.ToLower().EndsWith("_id"))
+            {
+				string EntityName = col.PropertyName.Substring(0, col.PropertyName.Length - 3);
+
+				foreach (Table foreignTable in table.DataSource.Tables)
+                {
+					if (EntityName.ToLower() == foreignTable.ClassName.ToLower())
+                    {
+						ForeignRelationship newRelationship = new ForeignRelationship();
+
+						newRelationship.ForeignRelation = foreignTable;
+						newRelationship.ColumnName = col.ColumnName;
+						table.BelongsToRelationships.Add(newRelationship);
+					}
+				}
+			}
+		}
+	}
+
+	private void FixHasManyRelationships (Table table)
+    {
+		string entityPropertyName = string.Format("{0}_Id", table.ClassName).ToLower();		
+		foreach (Table foreignTable in table.DataSource.Tables)
+        {
+			foreach (Column col in foreignTable.Columns)
+            {
+				if (col.PropertyName.ToLower() == entityPropertyName)
+                {
+					ForeignRelationship newHasManyRelationship = new ForeignRelationship();
+
+					newHasManyRelationship.ColumnName = col.ColumnName;
+					newHasManyRelationship.ForeignRelation = foreignTable;
+
+					table.HasManyRelationships.Add(newHasManyRelationship);
+				}
+			}	
+		}		
+	}
+
+	///This method saves the current output to a given file name
+	string SaveOutput(string outputFileName, bool overwriteIfExists = true)
+	{
+		string returnValue = "";
+        try 
+        {	        
+			string templateDirectory = Path.GetDirectoryName(Host.TemplateFile);
+			string outputFilePath = Path.Combine(templateDirectory, outputFileName);
+
+			if (!System.IO.Directory.Exists (System.IO.Path.GetDirectoryName (outputFilePath )))
+			{
+				System.IO.Directory.CreateDirectory (System.IO.Path.GetDirectoryName (outputFilePath ));
+			}
+
+			bool writeFile = true;
+
+			if (!overwriteIfExists) // Do not overwritefile if already exists:
+			{
+				//test if the file exists, then do nothing:
+				if (System.IO.File.Exists(outputFilePath))
+				{
+					writeFile = false;
+				}
+			}
+
+			if (writeFile)
+			{
+				File.WriteAllText(outputFilePath, this.GenerationEnvironment.ToString()); 
+				returnValue = outputFilePath;
+			}		
+
+			this.GenerationEnvironment.Remove(0, this.GenerationEnvironment.Length);
+        }
+        catch (Exception ex)
+        {
+			throw new Exception(string.Format ("Unable to write file [{0}].  Exception details: {1}", outputFileName, ex.ToString()));            
+        }		
+
+		return returnValue;
+	}
+
+	void ClearEnvironment()
+    {
+		this.GenerationEnvironment.Remove(0, this.GenerationEnvironment.Length);
+	}
+
+	private bool determineIfSupportsTextSearch(Table table, bool includeDependencies = true)
+    {
+		bool returnValue = false;
+		if (table.ContainsAny (Constants.ENTITY_DESCRIPTION_COLUMN_NAMES))
+        {
+			returnValue = true;
+		}
+		else 
+        {
+			if (includeDependencies)
+            {
+				foreach(ForeignRelationship relation in table.BelongsToRelationships)
+				{
+					if (relation.ForeignRelation.ContainsAny (Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES))
+					{
+						returnValue = true;
+						break;
+					}
+				}			
+			}			
+		}
+
+		return returnValue;	
+	}
+
+	private List<Column> GetSearchableColumns(Table table)
+    {
+		List<Column> cols = new List<Column>();
+		cols.AddRange (table.FilterColumns(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES));
+
+		foreach (ForeignRelationship relation in table.BelongsToRelationships)
+        {
+			cols.AddRange (relation.ForeignRelation.FilterColumns(Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES));
+		}
+
+		return cols;
+	}
+	
+#>
+
+<#+ 
+	
+	List<string> ExcludeList = new List<string>(){ "sysdiagrams" };
+	List<string> IncludeList = new List<string>();
+
+ #>

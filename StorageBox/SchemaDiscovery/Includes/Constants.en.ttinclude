@@ -1,0 +1,58 @@
+﻿<#@ Assembly Name="System.Core" #>
+<#@ Assembly name="System.Data" #> 
+<#@ assembly name="System.Xml" #> 
+<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Collections" #>
+<#@ import namespace="System.Collections.Generic" #> 
+<#@ import namespace="System.Data" #> 
+
+<#+ 
+	public partial class Constants
+	{
+		public const string DEFAULT_SCHEMADISCOVERY_XML = "SchemaDiscovery.xml";
+		//Audit information
+		public const string AUDIT_ONCREATION_TIMESTAMP = "CreatedOn";			
+		public const string AUDIT_ONCREATION_USERID = "CreatedBy";
+
+		public const string AUDIT_ONUPDATION_TIMESTAMP = "ModifiedOn";			
+		public const string AUDIT_ONUPDATION_USERID = "ModifiedBy";
+
+		public const string AUDIT_LOGICDELETION_FIELDNAME = "Active";
+		public const string AUDIT_LOGICDELETION_TIMESTAMP = "DeactivatedOn";
+		public const string AUDIT_LOGICDELETION_USERID = "DeactivatedBy";
+
+		/*
+		public const string DESCRIBIBLE_NAME_FIELDNAME = "Name";
+		public const string DESCRIBIBLE_DESCRIPTION_FIELDNAME = "Description";
+		*/
+
+	    public const string COMPUTER_GENERATED_ROUTINE_PREFIX = "cgp_";
+
+		public const string CUSTOM_WRITTEN_REPORT_PREFIX = "rpt_";
+
+		public const string LIST_ENTITY_ROUTINE_PREFIX = "get_";		
+
+		public const string ENTITY_DESCRIPTION_COLUMN_NAMES = "Name,Email,UserName,Title,CorreoElectronico,Nombre,Login,NombreUsuario,Titulo"; 
+		public const string ENTITY_SUBDESCRIPTION_COLUMN_NAMES = "Descripcion,Description"; 
+		public const string FOREIGN_DESCRIPTION_COLUMN_NAMES = "Email,Login,Title,CorreoElectronico,Nombre,Titulo";
+
+		public const string GEO_LAT_COLUMN_DESCRIPTORS = "Lat,Latitud";
+		public const string GEO_LONG_COLUMN_DESCRIPTORS = "Long,Longitud";
+
+		public const string COLOR_PICKER_COLUMN_NAME = "Color";
+
+		public const string ENTITY_REPORT_DETAIL_SUFFIX = "ReportDetail";
+
+		// All columns holding this suffix are for audit purposes, 
+		// therefore they wont presented on edit views.
+		public const string AUDITABLE_COLUMN_SUFFIX = "On,By";
+
+		public const string ENTITY_MAPPING_SUFFIX = "map";
+
+		public const string ICON_PICKER_COLUMN_NAME = "icono,icon";		
+	}
+	
+ #>

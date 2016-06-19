@@ -1,0 +1,240 @@
+﻿<#@ template debug="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".txt" #>
+<#@ include file="ResourceGenerator.ttinclude" #>
+
+-<#+ 
+	void GenerateReports(Project project, DataAccessGenerationSettings settings, string outputPath)
+	{
+        string reportName; 
+		DataSource ds = project.DataSources[0];
+		foreach(string tableName in settings.ReportGenerationList.Split(','))
+        {
+			foreach(Table table in ds.Tables)
+			{
+				if(table.Name.Trim().ToLower() == tableName.Trim().ToLower())
+                {
+					reportName = string.Format("{0}{1}ReportItem_GetReport", Constants.CUSTOM_WRITTEN_REPORT_PREFIX, table.Name);
+					GenerateReportRoutine(table, string.Format("[{0}].[{1}]",  table.Schema, reportName));
+					this.SaveOutput(System.IO.Path.Combine(outputPath, string.Format("{0}.sql", reportName)));
+					break;
+				}
+			}			
+		}
+	}
+
+	void GenerateReportRoutine(Table table, string reportName)
+	{		
+		List<string> InputParameters = new List<string>();
+
+		InputParameters.Add("@EntityId AS INT = 0");						
+
+		bool supportsTextSearch = this.determineIfSupportsTextSearch(table);
+		if (supportsTextSearch)
+        {
+			InputParameters.Add("@SearchText AS VARCHAR(100) = NULL");
+		}
+		
+		foreach(ForeignRelationship relation in table.BelongsToRelationships)
+        {
+			InputParameters.Add(string.Format ("@{0} AS INT = 0", relation.ColumnName));						
+		}
+
+ #>
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'<#= reportName #>') AND type in (N'P', N'PC'))
+DROP PROCEDURE <#= reportName #>
+GO
+
+-- =================================================================
+-- Description:	This gets a basic report for [<#= table.Name #>] table
+-- =================================================================
+CREATE PROCEDURE <#= reportName #>
+<#= string.Join(", " + Environment.NewLine, InputParameters.ToArray()) #>
+AS
+BEGIN
+	
+	-- IMPORTANT:
+	-- This is a computer generated procedure.  DO NOT ADD CUSTOM CODE TO THIS PROCEDURE.
+
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+	
+	-- 1) CREATE FILTER TABLE:
+	DECLARE @<#= table.Name #>Filter TABLE (
+		Id INT IDENTITY (1,1),
+		<#= table.Name #>_Id INT<#= supportsTextSearch ? string.Format(",{0}{1}", Environment.NewLine, "        FilterByText BIT DEFAULT 0") : ""  #>		
+	)
+<#+  
+	List<string> firstPassConditions = new List<string>();
+		
+	if (table.SupportsLogicalDeletion)
+    {
+		firstPassConditions.Add(string.Format ("[{0}].[{1}] = 1", table.Name, Constants.AUDIT_LOGICDELETION_FIELDNAME)); 
+	}
+
+	foreach (ForeignRelationship relation in table.BelongsToRelationships)
+    {
+		firstPassConditions.Add(string.Format ("(([{0}].[{1}] = @{1}) OR (@{1} = 0))", table.Name, relation.ColumnName));
+	}
+	
+#>
+
+
+    -- IF A GIVEN ID HAS BEEN SPECIFIED, THEN RETRIEVE THAT RECORD ONLY
+	IF @EntityId <> 0
+	BEGIN
+
+		INSERT INTO @<#= table.Name #>Filter (<#= table.Name #>_Id<#= supportsTextSearch ? ", FilterByText" : "" #>)
+		SELECT 
+			[<#= table.Name #>].Id<#= supportsTextSearch ? ", 1" : "" #>
+		FROM [<#= table.Schema #>].[<#= table.Name #>]
+		WHERE
+			 [<#= table.Schema #>].[<#= table.Name #>].[Id] = @EntityId
+
+	END
+	ELSE
+	BEGIN
+
+		-- 2) FILTER BY FOREIGN RELATIONSHIPS WHEN APLICABLE:
+		INSERT INTO @<#= table.Name #>Filter (<#= table.Name #>_Id)
+		SELECT 
+			[<#= table.Name #>].Id
+		FROM [<#= table.Schema #>].[<#= table.Name #>]
+<#+ if (firstPassConditions.Count > 0) // should we filter by foreign relationships:
+	{ #>
+		WHERE
+			 <#= string.Join(" AND" + Environment.NewLine + "         ", firstPassConditions.ToArray()) #>
+<#+
+    } 
+ #>
+
+ <#+  
+	if (supportsTextSearch)
+    {
+  #>
+
+		-- 3) FILTER BY TEXT SEARCH:
+		IF (@SearchText IS NOT NULL)
+		BEGIN		
+
+			UPDATE @<#= table.Name #>Filter SET FilterByText = 1
+			FROM @<#= table.Name #>Filter filter
+				JOIN [<#= table.Schema #>].[<#= table.Name #>]
+					ON [<#= table.Schema #>].[<#= table.Name #>].[Id] = filter.[<#= table.Name #>_Id]
+
+<#+ 
+	foreach(ForeignRelationship relation in table.BelongsToRelationships)
+    {
+		if (relation.ForeignRelation.ContainsAny(Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES))
+        {
+ #>
+				LEFT JOIN [<#= relation.ForeignRelation.Schema #>].[<#= relation.ForeignRelation.Name #>]
+					ON [<#= relation.ForeignRelation.Schema #>].[<#= relation.ForeignRelation.Name #>].[Id] = [<#= table.Schema #>].[<#= table.Name #>].[<#= relation.ColumnName #>]
+
+<#+ 
+        }
+    }
+	
+	List<Column> allSearchableColumns = this.GetSearchableColumns (table);
+
+	List<string> allSearchConditions = new List<string>();
+	foreach(Column searchCol in allSearchableColumns)
+    {
+		allSearchConditions.Add(string.Format ("([{0}].[{1}] LIKE @SearchText)", searchCol.Table.Name, searchCol.ColumnName));
+	}
+ #>
+			WHERE
+				-- LOOK IN ALL TEXT VALUES:
+				<#= string.Join(string.Format(" OR{0}			", Environment.NewLine), allSearchConditions.ToArray()) #>
+			
+		END
+		ELSE
+		BEGIN
+			-- IF SEARCH STRING WAS NOT SPECIFIED THEN INCLUDE ALL RECORDS:
+			UPDATE @<#= table.Name #>Filter SET FilterByText = 1
+		END
+
+<#+ 
+    }
+ #>
+	END
+
+ <#+ 
+ 
+	List<string> selectColumnList = new List<string>();
+
+	//First, add all table columns:
+	foreach(Column selCol in table.Columns)
+    {
+		selectColumnList.Add(string.Format("[{0}].[{1}]", selCol.Table.Name, selCol.ColumnName));
+	}	
+
+
+	//Now add all foreign descriptions:
+	foreach (ForeignRelationship relation in table.BelongsToRelationships)
+    {
+		if (this.determineIfSupportsTextSearch(relation.ForeignRelation)) // if the foreign contains text columns then include them:
+        {
+			foreach (Column selCol in relation.ForeignRelation.FilterColumns(Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES))
+            {
+				selectColumnList.Add(string.Format("[{0}].[{1}] AS [{0}{1}]", selCol.Table.Name, selCol.ColumnName));
+			}
+		}	
+	}
+ 
+  #>
+
+	-- 4) DELIVER THE FILTERED RESULTS:
+	SELECT 
+		<#= string.Join(string.Format (",{0}		", Environment.NewLine), selectColumnList.ToArray()) #>
+	FROM @<#= table.Name #>Filter filter
+		JOIN [<#= table.Schema #>].[<#= table.Name #>] 
+			ON [<#= table.Name #>].[Id] = filter.[<#= table.Name #>_Id] 
+			<#= supportsTextSearch ? "AND FilterByText = 1" : "" #>
+
+<#+ 
+	foreach(ForeignRelationship relation in table.BelongsToRelationships)
+    {
+		if (this.determineIfSupportsTextSearch(relation.ForeignRelation))
+        {
+ #>
+		LEFT JOIN [<#= relation.ForeignRelation.Schema #>].[<#= relation.ForeignRelation.Name #>]
+		ON [<#= table.Schema #>].[<#= table.Name #>].[<#= relation.ColumnName #>] = [<#= relation.ForeignRelation.Schema #>].[<#= relation.ForeignRelation.Name #>].[Id] 
+
+ <#+ 
+        }
+    }
+  #>
+
+END
+-- END OF [<#= table.Schema #>].[<#= Constants.COMPUTER_GENERATED_ROUTINE_PREFIX #><#= table.Name #>_GetReport]
+GO 
+
+<#+ 
+    }
+ #>
+
+
+<#+ 
+	public class DataAccessGenerationSettings
+	{
+        public bool GenerateAllReports { 
+			get
+			{
+				return string.IsNullOrEmpty(this.ReportGenerationList);			
+			}
+		}
+
+		public string ReportGenerationList { get; set; }
+
+        public DataAccessGenerationSettings ()
+        {				
+			this.ReportGenerationList = "";
+        }
+	}
+ #>

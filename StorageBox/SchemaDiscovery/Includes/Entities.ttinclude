@@ -1,0 +1,683 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ include file="Constants.en.ttinclude" #>
+<#+ 
+	
+	/* == Classes --------------------------------------------------------------------------------------------------------*/
+	public class Project
+	{
+		public string ProjectName { get; set; }
+		public string AssemblyName { get; set; }
+		public string RootNamespace { get; set; }
+		public string TargetLanguage { get; set; }
+		public List<DataSource> DataSources { get; set; }
+        public ProjectSettings Settings { get; set; }
+
+		public Project()
+		{
+			DataSources = new List<DataSource>();
+            Settings = new ProjectSettings();
+		}
+
+		public Table GetTable(string tableName)
+        {
+			Table returnValue = null;
+
+			foreach (DataSource ds in this.DataSources)
+            {
+				foreach(Table thisTable in ds.Tables)
+                {
+					if (tableName == thisTable.Name)
+                    {
+						returnValue = thisTable;
+						break;
+					}
+                }				
+			}
+
+			return returnValue;
+		}
+	}
+
+    public class ProjectSettings
+    {
+        public bool GenerateForeignRelationShips { get; set; }
+            
+        public ProjectSettings()
+        {
+            GenerateForeignRelationShips = true;
+        }
+
+    }
+
+	public class DataSource
+	{
+		public string DataSourceName { get; set; }
+		public string ProviderName { get; set; }
+		public string ConnectionString { get; set; }
+		public string GeneratedNamespace { get; set; }
+		public string IncludePrefixes { get; set; }
+		public List<Table> Tables { get; set; }
+        public List<StoredProcedure> Procedures { get; set; }
+		public Project Project { get; set; }
+		public DataSource()
+		{
+			Tables = new List<Table>();
+			Procedures = new List<StoredProcedure>();
+		}
+
+		///Determines if the datasource contains a particular entity name.
+		public bool ContainsTable(string tableName)
+        {
+			bool returnValue = false;
+
+			foreach (Table table in this.Tables)
+            {
+				if (table.Name.ToLower() == tableName.ToLower())
+                {
+					returnValue = true;
+					break;
+				}
+			}
+
+			return returnValue;
+		}
+
+		public Table GetTable(string tableName)
+        {
+			Table selectedTable = null;
+
+			foreach (Table table in this.Tables)
+            {
+				if (table.Name.ToLower() == tableName.ToLower())
+                {
+					selectedTable = table;
+					break;
+				}
+			}
+
+			return selectedTable;
+		}
+
+		public StoredProcedure GetStoredProcedure(string storedProcedureName)
+        {
+			StoredProcedure proc = null;
+
+			foreach(StoredProcedure sp in this.Procedures)
+            {
+				if(sp.Name.Trim().ToLower() == storedProcedureName.Trim().ToLower())
+                {
+					proc = sp;
+					break;
+				}
+			}
+
+			return proc;
+		}
+	}
+
+	public class Table
+	{
+		public string Id { get; set; }
+		public string Name { get; set; }
+		public string Schema { get; set; }
+		public string Summary { get; set; }
+		public string ClassName { get; set; }
+		public string Scope { get; set; }
+		public string DisplayName { get; set; }
+		public string PluralDisplayName { get; set; }
+		public bool GenerateIndexController { get; set; }
+		public bool DisplayAuditInfoInGrids { get; set; }
+		public bool GenerateDetailUI { get; set; }
+		public bool SupportsMapping { get; set; }		
+
+        public bool GeneratePersistentStorage { get; set; }
+		public List<TableIndex> Indexes { get; set; }
+
+        public List<ForeignRelationship> BelongsToRelationships { get; set; }	
+		public List<ForeignRelationship> HasManyRelationships { get; set; }
+
+		public bool ? _IsAuditable;
+		public bool IsAuditable
+        {
+			get 
+            {
+				if (_IsAuditable.HasValue == false)
+                {
+					_IsAuditable = DetermineIfItsAuditable();
+				}
+				return _IsAuditable.Value;
+			}
+		}
+
+		private bool _ExposeCRUDToService;
+		public bool ExposeCRUDToService
+        {
+			get
+            {
+				return _ExposeCRUDToService;
+			}
+			set 
+			{
+				_ExposeCRUDToService = value;
+			}
+		}
+
+		private bool ? _IsDescribible;
+		public bool IsDescribible
+        {
+			get 
+			{
+				if (_IsDescribible.HasValue == false)
+                {
+					_IsDescribible = DetermineIfIsDescribible();
+				}
+				return _IsDescribible.Value;
+			}
+		}
+
+		private bool DetermineIfIsDescribible()
+        {
+			bool returnValue = false;
+				
+			if (this.ContainsAny(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES))
+            {			
+				returnValue = true;				
+			}
+
+			return returnValue;
+		}
+
+		///<Summary>
+		/// Gets the column that describes the entity.
+		///</Sumary>
+		public Column GetDescriptionColumn()
+        {
+			return this.GetFirstInList(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES);
+		}
+
+
+		public bool ? _SupportsLogicalDeletion;
+		public bool SupportsLogicalDeletion
+        {
+			get 
+            {
+				if (_SupportsLogicalDeletion.HasValue == false)
+                {
+					_SupportsLogicalDeletion = this.DetermineIfSupportsLogicalDeletions();
+				}
+				return _SupportsLogicalDeletion.Value;
+			}
+		}
+
+		//Determines if the table contains the required columns to be auditable:
+		private bool DetermineIfItsAuditable()
+        {
+			bool returnValue = false;
+			if (this.Contains(Constants.AUDIT_ONCREATION_TIMESTAMP) && 
+				this.Contains(Constants.AUDIT_ONCREATION_USERID) &&
+				this.Contains(Constants.AUDIT_ONUPDATION_TIMESTAMP) &&
+				this.Contains(Constants.AUDIT_ONUPDATION_USERID))
+            {
+				returnValue = true;
+			}
+			return returnValue;
+		}
+
+		public bool BelongsToDescribibleEntities()
+        {
+			bool returnValue = false;
+			Table fkRel;
+			
+			foreach (ForeignRelationship rel in this.BelongsToRelationships)
+            {
+				fkRel = rel.ForeignRelation;
+				if(fkRel.ContainsAny(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES))
+                {
+					returnValue = true;
+					break;
+				}
+			}
+
+			return returnValue;
+		}
+
+		//Determines if the table supports logical deletions
+		private bool DetermineIfSupportsLogicalDeletions()
+        {
+			bool returnValue = false;
+			if (this.Contains(Constants.AUDIT_LOGICDELETION_FIELDNAME) && 
+				this.Contains(Constants.AUDIT_LOGICDELETION_USERID) &&
+				this.Contains(Constants.AUDIT_LOGICDELETION_TIMESTAMP))
+            {
+				returnValue = true;
+			}
+			return returnValue;
+		}
+
+		public bool Contains(string columnName)
+        {
+			bool returnValue = false;
+
+			foreach (Column col in this.Columns)
+            {
+				if (col.PropertyName.ToLower() == columnName.ToLower())
+                {
+					returnValue = true;
+					break;					
+				}
+			}
+
+			return returnValue;
+		}
+
+		///Determines if a table contains any of the comma separated columns indicated.
+		public bool ContainsAny(string columnNames)
+        {
+			bool returnValue = false;
+			string[] allColumns = columnNames.Split(',');
+
+			foreach (string colName in allColumns)
+            {
+				if (this.Contains(colName))
+                {
+					returnValue = true;
+					break;
+				}
+			}
+
+			return returnValue;
+		}
+				
+		public string OutputScope {
+			get 
+			{
+				string outputScope = "undefined";
+
+				switch (Scope) 
+				{
+					case "_Public": 
+						outputScope = "public";
+						break;
+					case "_Friend":
+						outputScope = "internal";
+						break;
+					case "_Protected":
+						outputScope = "protected";
+						break;
+				}
+
+				return outputScope;
+			}
+		}
+		public string PluralClassName { get; set; }
+		public DataSource DataSource { get; set; }
+
+		public List<Column> Columns { get; set; }
+		public Table()
+		{
+			Columns = new List<Column>();
+			Indexes = new List<TableIndex>();
+			BelongsToRelationships = new List<ForeignRelationship>();
+			HasManyRelationships = new List<ForeignRelationship>();
+			ExposeCRUDToService = false;
+		}
+
+		public Column GetColumnByColumnName(string columnName)
+        {
+			Column returnValue = null;
+			foreach (Column col in this.Columns)
+            {
+				if (col.ColumnName.ToLower() == columnName.ToLower())
+                {
+					returnValue = col;
+					break;
+				}
+			}
+			return returnValue;
+		}		
+
+		///Given a list of columns in a comma separated string, returns the list of columns that match:
+		
+		public List<Column> FilterColumns(string columnNames)
+        {
+			List<Column> filteredCols = new List<Column>();
+			string [] allColumns = columnNames.Split(',');
+
+			Column foundCol;
+			foreach(string colName in allColumns)
+            {
+				foundCol = this.GetColumnByColumnName(colName);
+				if (foundCol != null)
+                {
+					filteredCols.Add(foundCol);
+				}
+			}
+
+			return filteredCols;			
+		}
+
+		public Column GetColumnByPropertyName(string propertyName)
+        {
+			Column returnValue = null;
+			foreach (Column col in this.Columns)
+            {
+				if (col.PropertyName.ToLower() == propertyName.ToLower())
+                {
+					returnValue = col;
+					break;
+				}
+			}
+			return returnValue;
+		}
+
+		//Given a list of columns in a comma separated list, returns the first column that matches a name:
+		public Column GetFirstInList(string columnNames)
+        {
+			Column returnValue = null;
+
+			foreach (string colName in columnNames.Split(','))
+            {
+				returnValue = this.GetColumnByColumnName(colName);
+				if (returnValue != null)
+                { 
+					break;
+				}
+			}
+
+			return returnValue;
+		}
+
+		///Determines if table should generate combo code
+		public bool IsCombo()
+        {
+			if (HasManyRelationships.Count > 0)
+            {
+				if (ContainsAny(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES))
+                {
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	public class Column
+	{
+		public string ColumnName { get; set; }
+		public string PropertyName { get; set; }
+		public string SQLType { get; set; }
+		public int CharMaxLength { get; set; }
+		public bool IsNullable { get; set; }
+		public bool IsIdentity { get; set; }
+		public bool DisplayInGrid { get; set; }
+		public string Summary { get; set; }
+		public string DisplayName { get; set; }
+        public int NumericPrecision { get; set; }
+		public int NumericScale { get; set; }
+		public int Width { get; set; }
+		public Table Table { get; set; }
+
+		
+		public bool IsForeignRelation()
+        {
+			bool returnValue = false;
+
+			foreach(ForeignRelationship relation in this.Table.BelongsToRelationships)
+            {
+				if (relation.ColumnName == this.ColumnName)
+                {
+					returnValue = true;
+					break;
+				}
+			}
+		
+			return returnValue;
+		}
+
+		public ForeignRelationship GetRelation()
+        {
+			ForeignRelationship relationship = null;
+
+			foreach(ForeignRelationship relation in this.Table.BelongsToRelationships)
+            {
+				if (relation.ColumnName == this.ColumnName)
+                {
+					relationship = relation;					
+				}
+			}
+
+			return relationship;
+		}
+
+		///Determines if a column is auditable:
+		public bool IsAuditable()
+        {			
+			List<string> cols = new List<string>();
+				
+			cols.Add(Constants.AUDIT_ONCREATION_USERID);
+			cols.Add(Constants.AUDIT_ONCREATION_TIMESTAMP);
+
+			cols.Add(Constants.AUDIT_ONUPDATION_USERID);
+			cols.Add(Constants.AUDIT_ONUPDATION_TIMESTAMP);
+
+			return this.IsAnyOfThese (string.Join(",", cols.ToArray()));            
+		}
+
+		public bool IsDescriptionColumn()
+        {
+			return this.IsAnyOfThese(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES);
+		}
+
+		///Determines if a column is equal to any of the given names
+		public bool IsAnyOfThese(string columnList)
+        {
+			bool returnValue = false;
+			foreach(string colName in columnList.Split(','))
+            {
+				if (this.ColumnName.ToLower() == colName.ToLower())
+                {
+					returnValue = true;
+					break;
+				}
+			}
+			return returnValue;
+		}
+	}
+	
+	public enum KeyType {
+		PrimaryKey,
+		Index
+	}
+
+	public class TableKey
+    {
+        public string KeyName { get; set; }
+        public KeyType KeyType { get; set; }
+
+		public List<KeyColumn> Columns { get; set; }
+
+        public TableKey ()
+        {	
+			Columns = new List<KeyColumn>();
+        }
+	}
+
+	public class KeyColumn
+    {
+        public string ColumnName { get; set; }
+        public SortDirection Direction { get; set; }
+		
+	}
+
+	public enum SortDirection
+    {
+		Ascending,
+		Descending
+	}
+
+	public class IndexColumn
+    {
+		public string ColumnName { get; set; }
+		public SortDirection Direction { get; set; }
+	}
+
+	public class TableIndex
+    {
+        public string IndexName { get; set; }
+		public List<IndexColumn> Columns {get; set;}
+
+        public TableIndex ()
+        {
+			Columns = new List<IndexColumn>();
+        }	
+	}
+
+	public class ForeignRelationship
+    {
+        public Table ForeignRelation { get; set; }
+		public string ColumnName { get; set; }	
+	}
+	
+    public class StoredProcedure
+    {
+        public string SchemaName { get; set; }
+        public string Name { get; set; }
+        public string Summary { get; set; }
+        public DataSource DataSource { get; set; }
+        public List<StoredProcedureParameter> Parameters { get; set; }
+		public List<Column> ReturnedColumns { get; set; }
+        public string CodeDefinition { get; set; }
+
+		private string _MethodName;
+		public string MethodName 
+		{
+			get 
+            {
+				if (string.IsNullOrEmpty (_MethodName))
+                {
+					_MethodName = DetermineMethodName();
+				}
+				return _MethodName;
+			}
+        }
+
+		private string DetermineMethodName ()
+        {
+			string noPrefix = this.Name.Substring(4);
+
+			if (BelongsTo != "undefined")
+            {
+				noPrefix = noPrefix.Substring (BelongsTo.Length + 1);
+			}
+
+			return noPrefix;
+		}
+
+		private string _BelongsTo;
+        public string BelongsTo 
+		{ 
+			get {
+				if (string.IsNullOrEmpty(_BelongsTo))
+                {
+					_BelongsTo = DetermineOwnership();
+				}
+				return _BelongsTo;
+			}
+        }
+
+		///
+		private string DetermineOwnership()
+        {
+			string ownerShip = "undefined";
+
+			//remove prefix:
+			string noPrefix = this.Name.Substring(4).ToLower();
+
+			foreach (Table table in DataSource.Tables)
+            {
+				if (noPrefix.StartsWith (string.Format ("{0}_", table.Name).ToLower()))
+                {
+					ownerShip = table.ClassName;
+					break;					
+				}				
+			}			
+
+			return ownerShip;
+		}
+
+		public Table LoadVirtualTable(string tableName)
+        {
+			Table table;
+			if(!(this.ReturnedColumns.Count > 0))
+			{
+				throw new Exception(string.Format("Unable to generate report.  Routine [{0}] has no column information.", this.Name));
+			}
+						
+			table = new Table();
+			table.Name = tableName;
+			table.ClassName = tableName;
+			table.PluralClassName = string.Format("{0}Set", tableName);
+			table.Schema = "dbo";
+			table.DataSource = this.DataSource;
+
+			foreach(Column col in this.ReturnedColumns)
+			{	
+				col.Table = table;
+				table.Columns.Add(col);
+			}		
+
+			return table;		
+		}
+
+		/*
+		private bool ? _IsReport;
+		public bool IsReport 
+        {
+			get 
+            {
+				if (_IsReport.HasValue == false) 
+                {
+					_IsReport = DetermineIfItsAReport();
+				}
+				return _IsReport.Value;
+			}
+		}
+
+		private bool DetermineIfItsAReport()
+        {
+			bool returnValue = false;			
+			if (this.Name.ToLower().StartsWith(Constants.REPORT_PROCEDURE_PREFIX))
+            {
+				returnValue = true;
+			}
+			return returnValue;
+		} */
+
+        public StoredProcedure ()
+        {
+			Parameters = new List<StoredProcedureParameter>();
+			ReturnedColumns = new List<Column>();
+        }
+	}
+
+	public class StoredProcedureParameter
+	{		
+		public string ParameterName { get; set; }
+		public string SQLType { get; set; }
+		public int CharMaxLength { get; set; }		
+		public string PropertyName
+        {
+			get 
+			{   //remove the @:
+				return ParameterName.Substring(1);
+            }
+		}
+
+        public StoredProcedure Procedure { get; set; }
+	}
+
+ #>

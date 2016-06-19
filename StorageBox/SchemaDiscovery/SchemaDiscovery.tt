@@ -1,0 +1,36 @@
+﻿<#@ template debug="false" hostSpecific="true" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".cs" #>
+<#@ include file="$(ProjectDir)SchemaDiscovery\Generators\DataAccess.ttinclude" #>
+
+<# 
+	//Set reports:
+	DataAccessGenerationSettings dbGenerationSettings = new DataAccessGenerationSettings()
+	{		
+		ReportGenerationList= "Comprobante,Cuenta"
+	};	
+
+	this.ClearEnvironment(); 
+	//Load schema file:
+	Project project = LoadSchemaGenerationProject();
+	
+	//1) Generate resources:
+	GenerateResourceFile(project.DataSources[0]);
+	SaveOutput(@"..\Resources\Entities.resx");
+	
+	//2) Generate routines:
+	GenerateReports(project, dbGenerationSettings, @".\Reports\");	
+
+	//3) Generate Data Access Code:
+	this.ClearEnvironment(); 
+	//Control generation settings:
+	project.Settings.GenerateForeignRelationShips = true;	
+	GenerateCode(project);
+	//SaveOutput("SchemaDiscovery.cs");
+	
+
+
+ #>

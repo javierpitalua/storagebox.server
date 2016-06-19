@@ -1,0 +1,1549 @@
+﻿<#@ template debug="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".txt" #>
+<#@ include file="RoutineGenerator.ttinclude" #>
+
+<#+ 
+	public void GenerateDataAccessCode(Project project)
+	{
+		try 
+		{	        
+			this.GenerateCode(project);
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine("Something went wrong with code generation:");		 
+			Console.WriteLine(ex.ToString());
+			throw;
+		}		
+	}
+
+	public void GenerateCode(Project project)
+	{
+#>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Data;
+using System.Data.Common;
+using System.Threading.Tasks;
+using System.Xml.Serialization;
+using AppSimplicity.ActiveRecord;
+using AppSimplicity.ActiveRecord.DataAccess;
+using AppSimplicity.ActiveRecord.QueryBuilder;
+using AppSimplicity.ActiveRecord.Mapping;
+using Newtonsoft.Json;
+
+<#+		
+foreach (DataSource ds in project.DataSources)
+{              
+
+#>
+
+///Entities definitions:
+namespace <#= ds.GeneratedNamespace #>.Entities 
+{
+<#+ 
+	foreach (Table table in ds.Tables)
+	{   		
+		GenerateClass(table);		
+		this.GenerateReportEntityClass(table);			
+	}
+
+	//GenerateDataContext(ds);
+	//SaveOutput(string.Format(@"..\DataAccess\Base\{0}DataContext.cs", ds.DataSourceName));
+
+#>
+}
+
+///DataAccess implementations:
+namespace <#= ds.GeneratedNamespace #>.DataAccess
+{
+	public class DataContext
+    {
+        public const string CONNECTION_NAME = "<#= ds.DataSourceName #>";
+    }
+
+<#+ 
+	foreach (Table table in ds.Tables)
+	{  	
+		GenerateDataAccessImplementations(table);
+		GeneratePluralClass(table);
+	}
+
+ #>
+} 
+
+namespace <#= ds.GeneratedNamespace #>.Reports
+{
+<#+ 
+	foreach(StoredProcedure proc in ds.Procedures)
+    {
+		if(proc.Name.StartsWith(Constants.CUSTOM_WRITTEN_REPORT_PREFIX))
+        {
+			this.GenerateReportClass(proc);			
+		}
+	}
+ #>
+}
+
+<#+ 
+}
+#>
+
+<#+ 
+    }
+#>
+
+<#+ 
+	public void GenerateClass(Table table)
+    {
+		List<string> implementations = new List<string>();
+		
+		if (table.IsAuditable)
+        {
+			implementations.Add ("IAuditable");
+		}
+
+		if (table.SupportsLogicalDeletion)
+        {
+			implementations.Add("IDeactivable");
+		}
+
+		string implements = "";
+
+		if (implementations.Count > 0)
+        {
+			implements = string.Format(", {0}", string.Join(", ", implementations.ToArray()));
+		}
+#>
+
+    [Serializable]
+    <#= table.OutputScope #> partial class <#=table.ClassName #> : IActiveRecord<#= implements #>
+	{
+<#+
+
+foreach (Column col in table.Columns) // render all columns
+{
+    string TargetType = "undefined";
+	PropertyTypeMapping mappingType;
+
+    if (typeMappingsCSharp.ContainsKey(col.SQLType)) 
+    {
+        bool useNullableMark = false;
+		mappingType = typeMappingsCSharp[col.SQLType];
+		
+        if (col.IsNullable) 
+        {
+            if (mappingType.IsCLRNullable)
+            {
+                useNullableMark = true;
+            }
+        }		 
+        
+		if (mappingType.MappingType.ToLower() == "datetime")
+        {
+			useNullableMark = true;
+		}
+
+        TargetType = useNullableMark ? string.Format("{0} ?", typeMappingsCSharp[col.SQLType].MappingType) : typeMappingsCSharp[col.SQLType].MappingType;       
+    }
+
+       
+    #>	
+		/// <summary>
+		/// <#=col.Summary #>
+		/// </summary>
+	    public <#= TargetType #> <#=col.PropertyName #> { get; set; }
+<#+ 
+} // end of for column
+#>			
+
+<#+
+        if (table.DataSource.Project.Settings.GenerateForeignRelationShips)
+        {
+#>
+		#region Navigation Properties
+<#+ 
+			foreach (ForeignRelationship belongsTo in table.BelongsToRelationships)
+			{
+				Table foreignEntity = belongsTo.ForeignRelation;
+				Column externalCol = table.GetColumnByColumnName(belongsTo.ColumnName);
+		
+#>
+
+        private <#= foreignEntity.ClassName #> _<#= foreignEntity.ClassName #> = null;
+        /// <summary>
+        /// Navigation property for the <#= foreignEntity.ClassName #> relationship
+        /// </summary>
+		[XmlIgnoreAttribute, JsonIgnore]		
+        public <#= foreignEntity.ClassName #> <#= foreignEntity.ClassName #> 
+        {
+            get 
+            {
+                if (_<#= foreignEntity.ClassName #> == null)
+                {
+<#+ 
+					if (externalCol.IsNullable) // if foreign col is nullable then we need to ensure that property has value:
+                    {
+						if (!(externalCol.CharMaxLength != 0))
+                        {
+#>
+                    if (<#= externalCol.PropertyName #>.HasValue)
+                    {
+                        _<#= foreignEntity.ClassName #> = DataAccess.<#= foreignEntity.PluralClassName #>.FetchById(<#= externalCol.PropertyName #>.Value);
+                    }
+<#+						}
+					}
+					else
+                    {
+#>
+					_<#= foreignEntity.ClassName #> = DataAccess.<#= foreignEntity.PluralClassName #>.FetchById(<#= externalCol.PropertyName #>);
+<#+ 
+                    }
+ #>                    
+                }
+                return _<#= foreignEntity.ClassName #>;
+            }
+            set 
+            {
+                _<#= foreignEntity.ClassName #> = value;
+            }
+        }
+<#+		
+
+            } // end for.
+#>
+		#endregion
+<#+
+		}// end if for condition relationships
+#>		
+		
+<#+ 	
+		if(table.IsAuditable) 
+		{
+			Column audit_userid = table.GetColumnByColumnName(Constants.AUDIT_ONCREATION_USERID);
+			if (audit_userid.ColumnName.ToLower() != "createdby")
+			{
+#>
+		#region IAuditable
+
+		public string CreatedBy
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONCREATION_USERID).PropertyName #>;
+			}
+			set 
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONCREATION_USERID).PropertyName #> = value;
+			}
+		}
+
+		public DateTime? CreatedOn
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONCREATION_TIMESTAMP).PropertyName #>;
+			}
+			set 
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONCREATION_TIMESTAMP).PropertyName #> = value;
+			}
+		}
+
+		public string ModifiedBy
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONUPDATION_USERID).PropertyName #>;
+			}
+			set 
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONUPDATION_USERID).PropertyName #> = value;
+			}
+		}
+
+		public DateTime? ModifiedOn
+		{
+			get 
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONUPDATION_TIMESTAMP).PropertyName #>;
+			}
+			set
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_ONUPDATION_TIMESTAMP).PropertyName #> = value;
+			}
+		}
+
+		#endregion
+
+<#+ 
+		if(table.SupportsLogicalDeletion)
+        {
+			Column audit_logicdel = table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_FIELDNAME);
+
+			if(audit_logicdel.ColumnName.ToLower() != "active")
+            {
+#>
+		#region IDeactivable
+
+		public bool Active
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_FIELDNAME).PropertyName #>;
+			}
+			set 
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_FIELDNAME).PropertyName #> = value;
+			}
+		}
+
+		public string DeactivatedBy
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_USERID).PropertyName #>;
+			}
+			set
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_USERID).PropertyName #> = value;
+			}
+		}
+
+		public DateTime? DeactivatedOn
+		{
+			get
+			{
+				return this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_TIMESTAMP).PropertyName #>;
+			}
+			set
+			{
+				this.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_TIMESTAMP).PropertyName #> = value;
+			}
+
+		}
+
+		#endregion
+<#+ 
+			}
+		}
+ #>
+
+
+<#+ 
+			}		
+		} 
+	
+#>
+	}
+
+<#+
+	} //End of GenerateClass
+#>
+
+<#+ 
+	public void GenerateReportEntityClass(Table table)
+    {
+
+		List<Column> foreignDescriptions = new List<Column>();
+
+		foreach (ForeignRelationship relation in table.BelongsToRelationships)
+        {
+			foreignDescriptions.AddRange (relation.ForeignRelation.FilterColumns(Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES));
+		}
+
+
+#>
+
+    [Serializable]
+    <#= table.OutputScope #> partial class <#=table.ClassName #>ReportDetail : <#= table.ClassName #>
+	{
+
+	<#+ 
+		foreach (Column descCol in foreignDescriptions)
+        {
+		#>
+		/// <summary>
+		/// Description for <#= descCol.Table.ClassName #> entity
+		/// </summary>
+	    public string <#= string.Format("{0}{1}", descCol.Table.ClassName, descCol.PropertyName) #> { get; set; }
+
+		<#+ 
+		}
+	
+	 #>
+				
+		public bool Selected { get; set; }
+
+        public string DT_RowId
+        {
+            get
+            {
+                return string.Format("{0}Row_{1}", "<#= table.ClassName.ToLower() #>", Id);
+            }
+        }
+	}
+
+<#+ 	
+	}
+ #>
+
+
+
+
+<#+ 
+
+	public bool GenerateReportClassesForTable(Table table)
+    {
+		return true;
+	}
+
+	public void GenerateDataAccessImplementations(Table table)
+	{ 
+		this.GenerateDataController(table); 
+		this.GenerateDataFactory(table);
+
+		if(GenerateReportClassesForTable(table))
+        {
+			this.GenerateReportDetailDataFactory(table);	
+		}	
+
+		this.GenerateQueryBuilder(table);
+	}
+ #>
+
+<#+ 
+	public void GenerateDataController(Table table)
+    {#>
+	
+    
+
+	internal partial class <#= table.ClassName #>Persister : EntityPersister<Entities.<#= table.ClassName #>>
+    {
+        public <#= table.ClassName #>Persister() : base (DataContext.CONNECTION_NAME)
+        {
+
+        }
+        
+        protected override DbCommand GetInsertStatement(Entities.<#= table.ClassName #> entity)
+        {
+            DbCommand command = CreateCommand(GetInsertStatement(<#= table.PluralClassName #>.Schema), CommandType.Text);
+<#+ 
+			foreach (Column col in table.Columns)
+            {
+				if (!col.IsIdentity)
+                {
+#>
+			command.Parameters.Add(CreateParameter("<#= col.ColumnName #>", entity.<#= col.PropertyName #>));
+<#+ 
+				}
+			} 
+#>
+            return command;
+        }
+
+        protected override DbCommand GetDeleteStatement(int Id)
+        {
+            DbCommand command = CreateCommand(GetDeleteStatement(<#= table.PluralClassName #>.Schema), CommandType.Text);
+            command.Parameters.Add(CreateParameter("Id", Id));
+            return command;
+        }
+
+        protected override DbCommand GetUpdateStatement(Entities.<#= table.ClassName #> entity)
+        {
+            DbCommand command = CreateCommand(GetUpdateStatement(<#= table.PluralClassName #>.Schema), CommandType.Text);
+<#+ 
+			foreach (Column col in table.Columns)
+            {
+#>
+			command.Parameters.Add(CreateParameter("<#= col.ColumnName #>", entity.<#= col.PropertyName #>));
+<#+ 
+			} 
+#>
+            return command;
+        }        
+	}
+
+    internal partial class <#= table.ClassName #>DataController : AppSimplicity.ActiveRecord.DataAccess.BaseEntityDataController<Entities.<#= table.ClassName #>>
+    {
+		#region DataValidations
+		protected override void RunDataValidations(Entities.<#= table.ClassName #> entity, AppSimplicity.ActiveRecord.Validation.ValidationSummary summary)
+        {
+<#+ 
+			foreach (Column col in table.Columns)
+            {		
+				if (!col.IsNullable)
+                {
+					PropertyTypeMapping mapping = typeMappingsCSharp[col.SQLType];
+					if (mapping.TreatAsText)
+                    {
+						if (col.ColumnName.ToLower() != Constants.AUDIT_ONCREATION_USERID.ToLower())
+                        {
+#>
+			if (string.IsNullOrEmpty(entity.<#= col.PropertyName #>))
+			{
+				summary.AddErrorDetail("<#= col.PropertyName #>", string.Format(AppSimplicity.ActiveRecord.Messages.REQUIRED_FIELD, <#= table.DataSource.GeneratedNamespace #>.Resources.Entities.<#= table.ClassName.ToUpper() #>_<#= col.PropertyName.ToUpper() #>_DISPLAYNAME));
+			}
+
+<#+						}
+					}
+					else 
+					if ((col.SQLType.ToLower() == "smalldatetime") || 
+						(col.SQLType.ToLower() == "datetime"))
+                    {
+						if ((!col.IsAuditable()) && (!col.IsNullable))
+                        {	
+#>
+			if (!entity.<#= col.PropertyName #>.HasValue)
+			{
+				summary.AddErrorDetail("<#= col.PropertyName #>", string.Format(AppSimplicity.ActiveRecord.Messages.REQUIRED_FIELD, <#= table.DataSource.GeneratedNamespace #>.Resources.Entities.<#= table.ClassName.ToUpper() #>_<#= col.PropertyName.ToUpper() #>_DISPLAYNAME));
+			}
+<#+ 						
+						}
+					}
+				}				
+            }
+  #>
+        }
+		#endregion
+
+        #region ctor
+        public <#= table.ClassName #>DataController()
+            : base(new <#= table.ClassName #>Persister())
+        {
+
+        }
+        #endregion
+    }
+    
+<#+ 
+	}
+ #>
+
+<#+ 
+	public void GenerateDataFactory(Table table)
+    {
+
+		Dictionary<string, string> ConversionMapping = new Dictionary<string, string>()
+        {
+            {"string", "StringValue"},
+            {"int", "Int32"},
+            {"DateTime", "DateTime"},
+            {"Decimal", "Decimal"},
+            {"long", "Int64"},
+            {"bool", "Boolean"}
+		};
+
+		List<string> PropertyMappings = new List<string>();
+		PropertyTypeMapping mapping; 
+		string convertTo =string.Empty;
+		foreach (Column col in table.Columns)
+        {
+			mapping = this.typeMappingsCSharp[col.SQLType];
+
+			if (col.IsNullable)
+            {
+				if (mapping.IsCLRNullable)
+				{
+					convertTo = string.Format ("{0}Nullable", ConversionMapping[mapping.MappingType]);
+				}
+				else 
+				{
+					convertTo = ConversionMapping[mapping.MappingType];
+				}
+			}
+			else 
+			{
+				convertTo = ConversionMapping[mapping.MappingType];
+            }
+			
+			PropertyMappings.Add(string.Format(@"                {0} = Map.To{1}(reader[""{2}""])", col.PropertyName, convertTo, col.ColumnName));
+		}
+	
+#>
+
+    #region Factory 
+    public partial class <#= table.ClassName #>Factory : BaseEntityFactory<Entities.<#= table.ClassName #>>
+    {
+		partial void PopulateEntity(ref Entities.<#= table.ClassName #> entity, DbDataReader reader);
+
+        protected override Entities.<#= table.ClassName #> LoadEntity(DbDataReader reader)
+        {
+            Entities.<#= table.ClassName #> Entity = new Entities.<#= table.ClassName #>()
+            {
+<#= string.Join("," + Environment.NewLine, PropertyMappings.ToArray()) #>
+            };
+
+			PopulateEntity(ref Entity, reader);
+
+            return Entity;
+        }
+
+        public <#= table.ClassName #>Factory()
+            : base(DataContext.CONNECTION_NAME)
+        {
+
+        }
+    }
+    #endregion
+	<#+
+	}
+#>
+
+
+<#+ 
+ 
+	public void GenerateReportDetailDataFactory(Table table)
+    {	
+		Dictionary<string, string> ConversionMapping = new Dictionary<string, string>()
+        {
+            {"string", "StringValue"},
+            {"int", "Int32"},
+            {"DateTime", "DateTime"},
+            {"Decimal", "Decimal"},
+            {"long", "Int64"},
+            {"bool", "Boolean"}
+		};
+
+		List<string> PropertyMappings = new List<string>();
+		PropertyTypeMapping mapping; 
+		string convertTo =string.Empty;
+		foreach (Column col in table.Columns)
+        {
+			mapping = this.typeMappingsCSharp[col.SQLType];
+
+			if (col.IsNullable)
+            {
+				if (mapping.IsCLRNullable)
+				{
+					convertTo = string.Format ("{0}Nullable", ConversionMapping[mapping.MappingType]);
+				}
+				else 
+				{
+					convertTo = ConversionMapping[mapping.MappingType];
+				}
+			}
+			else 
+			{
+				convertTo = ConversionMapping[mapping.MappingType];
+            }
+			
+			PropertyMappings.Add(string.Format(@"                {0} = Map.To{1}(reader[""{2}""])", col.PropertyName, convertTo, col.ColumnName));
+		}
+
+		string propertyName;
+		string colName;
+		foreach(ForeignRelationship relation in table.BelongsToRelationships)
+        {
+			foreach(Column descCol in relation.ForeignRelation.FilterColumns(Constants.FOREIGN_DESCRIPTION_COLUMN_NAMES))
+            {
+				mapping = this.typeMappingsCSharp[descCol.SQLType];
+				propertyName = string.Format ("{0}{1}", descCol.Table.ClassName, descCol.PropertyName);
+				colName = string.Format("{0}{1}", descCol.Table.Name, descCol.ColumnName);
+				convertTo = ConversionMapping[mapping.MappingType];
+
+				PropertyMappings.Add(string.Format(@"                {0} = Map.To{1}(reader[""{2}""])", propertyName, convertTo, colName));
+			}
+		}
+		
+
+#>
+
+    #region Report Detail Factory
+    public partial class <#= table.ClassName #>ReportDetailFactory : BaseEntityFactory<Entities.<#= table.ClassName #>ReportDetail>
+    {
+		partial void PopulateEntity(ref Entities.<#= table.ClassName #>ReportDetail entity, DbDataReader reader);
+
+        protected override Entities.<#= table.ClassName #>ReportDetail LoadEntity(DbDataReader reader)
+        {
+            Entities.<#= table.ClassName #>ReportDetail Entity = new Entities.<#= table.ClassName #>ReportDetail()
+            {
+<#= string.Join("," + Environment.NewLine, PropertyMappings.ToArray()) #>
+            };
+
+			PopulateEntity(ref Entity, reader);
+
+            return Entity;
+        }
+
+        public <#= table.ClassName #>ReportDetailFactory()
+            : base(DataContext.CONNECTION_NAME)
+        {
+
+        }
+    }
+    #endregion		
+<#+ 
+	}
+  #>
+
+<#+ 
+	public void GenerateQueryBuilder(Table table) 
+    {
+#>
+
+	internal partial class <#= table.PluralClassName #>Schema
+	{
+<#+ 
+		this.RenderColumnEnumeration(table);
+ #>		
+	}
+
+	#region QueryBuilder
+	internal class <#= table.ClassName #>QueryBuilder : GenericBaseQueryBuilder<<#= table.DataSource.GeneratedNamespace #>.Entities.<#= table.ClassName #>>
+    {
+        /// <summary>
+        /// Executes the corresponding sql command and returns a single instance of <#= table.ClassName #> that matches the criteria.
+        /// </summary>
+        /// <returns></returns>
+        public override Entities.<#= table.ClassName #> FetchSingle()
+        {
+            <#= table.ClassName #>Factory factory = new <#= table.ClassName #>Factory();
+            return factory.FetchSingle(GetSqlCommand());
+        }
+
+        /// <summary>
+        /// Executes the corresponding sql command and returns a list of <#= table.ClassName #> that matches the criteria.
+        /// </summary>
+        /// <returns></returns>
+        public override List<Entities.<#= table.ClassName #>> FetchList()
+        {
+            return FetchFirst(0);
+        }
+
+        /// <summary>
+        /// Executes the corresponding sql command and returns a list of <#= table.ClassName #> that matches the criteria and returns the first records coming in the query.
+        /// </summary>
+        /// <param name="limit">Determines the number of records to be returned from database.</param>
+        /// <returns></returns>
+        public override List<Entities.<#= table.ClassName #>> FetchFirst(int limit)
+        {
+            <#= table.ClassName #>Factory factory = new <#= table.ClassName #>Factory();
+            return factory.FetchList(GetSqlCommand(limit));
+        }
+
+        public <#= table.ClassName #>QueryBuilder()
+            : base(DataContext.CONNECTION_NAME, <#= table.PluralClassName #>.GetSchema())
+        {
+
+        }
+
+        /// <summary>
+        /// Adds a condition to the query statement.
+        /// </summary>
+        /// <param name="column"></param>
+        /// <returns></returns>
+        public CriteriaBuilder Where(<#= table.PluralClassName #>Schema.Columns column)
+        {
+            return base.Where(Schema.Columns[(int)column]);
+        }
+
+		/// <summary>
+        /// Determines a condition for sorting when returning the list of entities.
+        /// </summary>
+        /// <param name="column"></param>
+        public void SortBy(<#= table.PluralClassName #>Schema.Columns column)
+        {
+            base.AddSortCondition(Schema.Columns[(int)column], SortDirection.Ascending);
+        }
+
+        /// <summary>
+        /// Determines condition and direction for sorting when returning the list of entities.
+        /// </summary>
+        /// <param name="column"></param>
+        public void SortBy(<#= table.PluralClassName #>Schema.Columns column, SortDirection direction)
+        {
+            base.AddSortCondition(Schema.Columns[(int)column], direction);
+        }
+    }
+	#endregion
+	
+<#+	
+	}
+ #>
+
+<#+
+	public void RenderColumnEnumeration (Table table)
+    {
+		List<string> Enumeration = new List<string>();
+
+		int n = 0;
+		foreach (Column col in table.Columns)
+        {
+			Enumeration.Add (string.Format ("            {0} = {1}", col.PropertyName, n));
+			n++;			
+		}
+	
+#>
+
+#region Column Enumeration
+		public enum Columns 
+        {
+<#= string.Join(", " + Environment.NewLine, Enumeration.ToArray()) #>
+        }
+#endregion	
+
+<#+ 	
+	}
+#>
+
+
+<#+ 
+	public void GenerateGetSchemaMethod(Table table)
+    {
+		List<string> ColumnList = new List<string>();
+		List<string> IndexList = new List<string>();
+		List<string> IndexCols = new List<string>();
+
+		string ColumnDbType;
+		foreach (Column col in table.Columns)
+        {
+			ColumnDbType = this.typeMappingsCSharp[col.SQLType].DataType;
+			ColumnList.Add(string.Format(@"            schema.AddColumn(""{0}"", DbType.{1}, {2});", col.ColumnName, ColumnDbType, col.IsIdentity ? "true" : "false"));  
+		}
+
+		//Now adding the indexes:
+		foreach(TableIndex index in table.Indexes)
+        {
+
+			foreach (IndexColumn col in index.Columns)
+            {
+				IndexCols.Add(col.ColumnName);
+			}
+
+			IndexList.Add(string.Format (@"            schema.Indexes.Add(new Index(""{0}"", ""{1}""));", index.IndexName, string.Join(",", IndexCols.ToArray())));
+		}
+ #>
+		/// <summary>
+        /// This method returns an instance that maps the schema 
+        /// </summary>
+        /// <returns></returns>
+        public static Schema GetSchema()
+        {
+            Schema schema = new Schema()
+            {
+                SchemaName = "<#= table.Schema #>",
+                TableName = "<#= table.Name #>"
+            };
+
+            //Adding the list of columns:
+<#= string.Join(Environment.NewLine, ColumnList.ToArray()) #>
+
+            //Adding the list of indexes:
+<#= string.Join(Environment.NewLine, IndexList.ToArray()) #>
+
+            return schema;
+        }
+
+<#+ 
+    }
+ #>
+
+
+<#+ 
+	public void GeneratePluralClass(Table table)
+    {
+#>
+    public partial class <#= table.PluralClassName #>
+    {	
+<#+ 
+		this.GenerateGetSchemaMethod(table);
+ #>		
+		private static Schema _Schema;
+		public static Schema Schema
+		{
+			get
+			{
+				if(_Schema == null)
+				{
+					_Schema = <#= table.PluralClassName #>.GetSchema();
+				}
+				return _Schema;
+			}
+		}
+
+		/// <summary>
+        /// Creates a record in the mapped data table [<#= table.Schema #>].[<#= table.Name #>]
+        /// </summary>
+        /// <param name="entity">A populated entity of <#= table.ClassName #></param>
+        public static void Create(Entities.<#= table.ClassName #> entity)
+        {
+            <#= table.ClassName #>DataController db = new <#= table.ClassName #>DataController();
+            db.Create(entity);
+        }
+
+		/// <summary>
+        /// Updates a record in the mapped data table [<#= table.Schema #>].[<#= table.Name #>]
+        /// </summary>
+        /// <param name="entity">A populated entity of <#= table.ClassName #></param>
+        public static void Update(Entities.<#= table.ClassName #> entity)
+        {
+            <#= table.ClassName #>DataController db = new <#= table.ClassName #>DataController();
+            db.Update(entity);
+        }
+
+		/// <summary>
+        /// Deletes a record in the mapped data table [<#= table.Schema #>].[<#= table.Name #>]
+        /// </summary>
+        /// <param name="entity">A populated entity of <#= table.ClassName #></param>
+        public static void Delete(Entities.<#= table.ClassName #> entity)
+        {
+            <#= table.ClassName #>DataController db = new <#= table.ClassName #>DataController();
+            db.Delete(entity);
+        }
+
+		/// <summary>
+        /// Persists the information of an entity to the data table [<#= table.Schema #>].[<#= table.Name #>]
+        /// </summary>
+        /// <param name="entity">A populated entity of <#= table.ClassName #></param>
+		public static void Save(Entities.<#= table.ClassName #> entity)
+        {
+            <#= table.ClassName  #>DataController db = new <#= table.ClassName #>DataController();
+            db.Save(entity);
+        }
+
+		/// <summary>
+        /// Retrieves a record from the mapped data table [<#= table.Schema #>].[<#= table.Name #>] using a given Id.
+        /// </summary>
+        /// <param name="id">The id value</param>
+        public static Entities.<#= table.ClassName #> FetchById(int id)
+        {
+            <#= table.ClassName #>QueryBuilder query = new <#= table.ClassName #>QueryBuilder();
+            query.Where(<#= table.PluralClassName #>Schema.Columns.Id).IsEqualTo(id);
+            return query.FetchSingle();
+        }
+
+
+<#+ 
+        foreach(ForeignRelationship rel in table.BelongsToRelationships)
+        {
+			
+#>
+		/// <summary>
+        /// Returns a list of <#= table.ClassName #> by a given <#= rel.ColumnName #>
+        /// </summary>                
+        public static List<<#= table.DataSource.GeneratedNamespace #>.Entities.<#= table.ClassName #>> GetBy<#= rel.ForeignRelation.ClassName #>(int <#= table.GetColumnByColumnName(rel.ColumnName).PropertyName #><#= table.SupportsLogicalDeletion ? ", bool includeActiveOnly = true" : "" #>)
+        {
+            <#= table.DataSource.GeneratedNamespace #>.DataAccess.<#= table.ClassName #>QueryBuilder query = new <#= table.ClassName #>QueryBuilder();
+            query.Where(<#= table.PluralClassName #>Schema.Columns.<#= table.GetColumnByColumnName(rel.ColumnName).PropertyName #>).IsEqualTo(<#= table.GetColumnByColumnName(rel.ColumnName).PropertyName #>);
+
+<#+		if (table.SupportsLogicalDeletion)
+		{ 
+#>
+            if (includeActiveOnly)
+            {
+                query.Where(<#= table.PluralClassName #>Schema.Columns.<#= Constants.AUDIT_LOGICDELETION_FIELDNAME #>).IsEqualTo(true);
+            }
+<#+ 
+        }
+ #>
+            
+            return query.FetchList();
+        }
+
+<#+  			
+		}
+
+
+		if (!table.Name.ToLower().EndsWith("map"))
+        {
+			foreach(ForeignRelationship rel in table.HasManyRelationships)
+			{
+				if (rel.ForeignRelation.Name.ToLower().EndsWith("map"))
+				{
+					foreach(ForeignRelationship mappingRel in rel.ForeignRelation.BelongsToRelationships)
+					{
+						if (table.Name != mappingRel.ForeignRelation.Name)
+						{
+	#>
+			// parent <#= mappingRel.ForeignRelation.Name #>, child: <#= table.Name #>, mapping: <#= rel.ForeignRelation.Name #>
+	<#+ 
+							this.GenerateMappingDataAccessMethods(mappingRel.ForeignRelation, table, rel.ForeignRelation);
+						}
+					}						
+				}
+			}
+		}
+ #>
+
+<#+ 
+	if (table.Name.ToLower().EndsWith("map"))
+    {
+		List<string> parameters = new List<string>();
+		List<string> parametersNoType = new List<string>();
+		List<string> queryConditions = new List<string>();
+
+		foreach(Column col in table.Columns)
+        {
+			if (col.ColumnName.ToLower().EndsWith("_id"))
+            {
+				parameters.Add(string.Format ("int {0}", col.PropertyName.ToLower()));
+				parametersNoType.Add(string.Format ("{0}", col.PropertyName.ToLower()));
+				queryConditions.Add(string.Format("            query.Where({0}Schema.Columns.{1}).IsEqualTo({2});", table.PluralClassName, col.PropertyName, col.PropertyName.ToLower()));
+			}
+		}
+
+ #>
+        #region Mapping
+        /// <summary>
+        /// Determines if a map between User and Organization already exists
+        /// </summary>
+        /// <param name="user_id"></param>
+        /// <param name="organization_id"></param>
+        /// <returns></returns>
+        public static bool AlreadyExists(<#= string.Join(", ", parameters.ToArray()) #>)
+        {
+            return GetMapping(<#= string.Join(", ", parametersNoType) #>) != null ? true : false;
+        }
+
+        /// <summary>
+        /// Gets a mapping record
+        /// </summary>
+        /// <param name="user_id"></param>
+        /// <param name="organization_id"></param>
+        /// <returns></returns>
+        public static Entities.<#= table.ClassName #> GetMapping(<#= string.Join(", ", parameters.ToArray()) #>)
+        {
+            <#= table.ClassName #>QueryBuilder query = new <#= table.ClassName #>QueryBuilder();
+<#= string.Join(" " + Environment.NewLine, queryConditions.ToArray())  #>            
+            return query.FetchSingle();
+        }
+        #endregion        
+<#+ 
+    }
+ #> 
+
+<#+ 
+		if (table.SupportsLogicalDeletion)
+        { #>
+		/// <summary>
+        /// Retrieves a list of records from the mapped data table [<#= table.Schema #>].[<#= table.Name #>].
+        /// </summary>
+        /// <param name="includeInactive">Determines if inactive records should be included in the list</param>
+	    public static List<Entities.<#= table.ClassName #>> FetchAll(bool includeInactive = false)
+        {
+            <#= table.ClassName #>QueryBuilder query = new <#= table.ClassName #>QueryBuilder();
+            if (!includeInactive)
+            {
+                query.Where(<#= table.PluralClassName #>Schema.Columns.<#= table.GetColumnByColumnName(Constants.AUDIT_LOGICDELETION_FIELDNAME).PropertyName #>).IsEqualTo(true);
+            }
+            return query.FetchList();
+        }		
+<#+ 
+		}
+		else
+        {
+#>
+		/// <summary>
+        /// Retrieves a list of records from the mapped data table [<#= table.Schema #>].[<#= table.Name #>].
+        /// </summary>        
+        public static List<Entities.<#= table.ClassName #>> FetchAll()
+        {
+            <#= table.ClassName #>QueryBuilder query = new <#= table.ClassName #>QueryBuilder();            
+            return query.FetchList();
+        }
+
+<#+ 		
+		}
+ #>
+
+<#+ 
+		bool supportsTextSearch = determineIfSupportsTextSearch(table);
+		bool generateReport = GenerateReportClassesForTable(table);
+
+		//Determines if report should be generated:
+		if(generateReport)
+        {
+#>
+        /// <summary>
+        /// Retrieves a report from the [<#= table.Name #>] table.
+        /// </summary>
+        /// <param name="settings">Sets the filter settings for running the report</param>
+        /// <returns></returns>
+        public static List<Entities.<#= table.ClassName #>ReportDetail> GetReport(<#= table.ClassName #>FilterSettings settings = null)
+        {
+			if (settings == null)
+            {
+                settings = new <#= table.ClassName #>FilterSettings();
+            }
+
+            <#= table.ClassName #>ReportDetailFactory factory = new <#= table.ClassName #>ReportDetailFactory();
+            return factory.FetchList("[<#= table.Schema #>].[<#= Constants.COMPUTER_GENERATED_ROUTINE_PREFIX #><#= table.Name #>_GetReport]", settings.GetParameters());
+        }
+
+<#+ 
+		}
+
+ #>
+ 		
+<#+
+		bool includeSP;
+		string prefix;
+		string methodName;
+		List<string> ParamDef = new List<string>();
+		foreach(StoredProcedure sp in table.DataSource.Procedures)
+        {
+			includeSP = false;
+			prefix = string.Format("{0}{1}_", Constants.LIST_ENTITY_ROUTINE_PREFIX, table.Name);
+			methodName = "";
+
+			if (sp.Name.ToLower().StartsWith(prefix.ToLower()))
+            {
+				includeSP = true;
+				methodName= sp.Name.Substring(prefix.Length, sp.Name.Length - prefix.Length);
+			}
+
+#>
+			
+<#+ 
+			if (includeSP)
+            {
+				ParamDef.Clear();				
+				PropertyTypeMapping mapping;
+				
+				foreach(StoredProcedureParameter param in sp.Parameters)
+                {
+					mapping = typeMappingsCSharp[param.SQLType];
+					ParamDef.Add(string.Format("{0} {1}", mapping.MappingType, param.PropertyName));
+				}
+
+ #>
+	
+
+		/// <summary>
+        /// Returns a list of <#= table.ClassName #> using stored procedure [<#= sp.Name #>]
+        /// </summary>        
+        /// <returns></returns>
+        public static <#= table.ClassName #>Factory Fetch<#= methodName #>(<#= string.Join(", ", ParamDef.ToArray()) #>)
+        {
+            <#= table.ClassName #>Factory factory = new <#= table.ClassName #>Factory();
+            List<System.Data.Common.DbParameter> parameters = new List<System.Data.Common.DbParameter>();
+
+<#+ 
+				foreach(StoredProcedureParameter param in sp.Parameters)
+				{
+ #>
+            parameters.Add(factory.CreateParameter ("<#= param.ParameterName #>", <#= param.PropertyName #>));
+<#+ 
+				}
+#>
+
+            factory.Command = factory.CreateProcedure ("[<#= sp.SchemaName #>].[<#= sp.Name#>]", parameters);
+            return factory;
+        }
+
+<#+ 
+		if(table.BelongsToRelationships.Count > 0)
+        {
+ #>
+		/// <summary>
+        /// Returns a list of <#= table.ClassName #>ReportDetail using stored procedure [<#= sp.Name #>]
+        /// </summary>        
+        /// <returns></returns>
+        public static <#= table.ClassName #>ReportDetailFactory FetchReport<#= methodName #>(<#= string.Join(", ", ParamDef.ToArray()) #>)
+        {
+            <#= table.ClassName #>ReportDetailFactory factory = new <#= table.ClassName #>ReportDetailFactory();
+            List<System.Data.Common.DbParameter> parameters = new List<System.Data.Common.DbParameter>();
+
+<#+ 
+				foreach(StoredProcedureParameter param in sp.Parameters)
+				{
+ #>
+            parameters.Add(factory.CreateParameter ("<#= param.ParameterName #>", <#= param.PropertyName #>));
+<#+ 
+				}
+#>
+
+            factory.Command = factory.CreateProcedure ("[<#= sp.SchemaName #>].[<#= sp.Name#>]", parameters);
+            return factory;
+        }
+
+<#+ 
+        }
+ #>
+
+
+<#+ 
+            }
+		}
+ #>
+
+    }
+
+	public partial class <#= table.ClassName #>FilterSettings : AppSimplicity.ActiveRecord.DataAccess.BaseEntityFilterSettings
+    {
+        <#= supportsTextSearch ? "public string SearchText { get; set; }" : "" #>
+
+<#+ 
+			foreach (ForeignRelationship relation in table.BelongsToRelationships)
+            {
+#>
+		public int <#= table.GetColumnByColumnName(relation.ColumnName).PropertyName #> { get; set; }
+<#+ 
+			}
+ #>            
+
+        protected override void LoadParameters()
+        {
+            <#= supportsTextSearch ? @"this.AddParameter(""SearchText"", string.IsNullOrEmpty(SearchText) ? null : SearchText.Contains('%') ? SearchText : string.Format (""%{0}%"", SearchText));" : "" #>
+<#+ 
+			foreach (ForeignRelationship relation in table.BelongsToRelationships)
+            {
+ #>
+            this.AddParameter("<#= relation.ColumnName #>", <#= table.GetColumnByColumnName(relation.ColumnName).PropertyName #>);
+<#+ 
+            }
+ #>
+        }
+
+        public <#= table.ClassName #>FilterSettings() : base(DataContext.CONNECTION_NAME) { }
+    }
+
+<#+ 		
+	}
+ #>
+
+
+<#+ 
+	public void GenerateMappingDataAccessMethods(Table parentEntity, Table childEntity, Table mappingEntity)
+    {
+		// Get the description column:
+		Column childEntityDescCol = childEntity.GetFirstInList(Constants.ENTITY_DESCRIPTION_COLUMN_NAMES);
+		// Validate if childentity contains a column for description:
+		if (childEntityDescCol == null)
+		{
+			childEntityDescCol = childEntity.Columns[1];
+		} 
+		
+		bool SupportsReport = (childEntity.BelongsToRelationships.Count > 0);
+
+ #>
+
+		#region <#= parentEntity.ClassName #> mapping
+
+<#+ 
+		if (!SupportsReport)
+        {
+ #>
+
+        /// <summary>
+        /// Returns the list of <#= childEntity.ClassName #>
+        /// </summary>
+        /// <param name="User_Id">The id of the parent relationship</param>
+        /// <returns>A list of Organization</returns>
+        public static List<<#= childEntity.DataSource.GeneratedNamespace #>.Entities.<#= childEntity.ClassName #>> Get<#= childEntity.PluralClassName #>By<#= parentEntity.ClassName #>(int <#= parentEntity.Name.ToLower() #>_id)
+        {
+            <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childEntity.ClassName #>Factory factory = new <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childEntity.ClassName #>Factory();
+            return factory.FetchList("[cgp_<#= childEntity.Name #>_ListBy<#= parentEntity.ClassName #>]", "<#= parentEntity.Name #>_Id", <#= parentEntity.Name.ToLower() #>_id);
+        }
+
+<#+ 
+        }
+		else
+        {
+			string childName = string.Format ("{0}ReportDetail", childEntity.ClassName);
+#>
+
+        /// <summary>
+        /// Returns the list of <#= childEntity.ClassName #>
+        /// </summary>
+        /// <param name="User_Id">The id of the parent relationship</param>
+        /// <returns>A list of Organization</returns>
+        public static List<<#= childEntity.DataSource.GeneratedNamespace #>.Entities.<#= childName #>> Get<#= childEntity.PluralClassName #>ReportBy<#= parentEntity.ClassName #>(int <#= parentEntity.Name.ToLower() #>_id)
+        {
+            <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childName #>Factory factory = new <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childName #>Factory();
+            return factory.FetchList("[cgp_<#= childEntity.Name #>_ListBy<#= parentEntity.ClassName #>]", "<#= parentEntity.Name #>_Id", <#= parentEntity.Name.ToLower() #>_id);
+        }
+
+		/// <summary>
+        /// Returns the list of <#= childEntity.ClassName #>
+        /// </summary>
+        /// <param name="User_Id">The id of the parent relationship</param>
+        /// <returns>A list of Organization</returns>
+        public static List<<#= childEntity.DataSource.GeneratedNamespace #>.Entities.<#= childEntity.ClassName #>> Get<#= childEntity.PluralClassName #>ListBy<#= parentEntity.ClassName #>(int <#= parentEntity.Name.ToLower() #>_id)
+        {
+            <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childEntity.ClassName #>Factory factory = new <#= childEntity.DataSource.GeneratedNamespace #>.DataAccess.<#= childEntity.ClassName #>Factory();
+            return factory.FetchList("[cgp_<#= childEntity.Name #>_ListBy<#= parentEntity.ClassName #>]", "<#= parentEntity.Name #>_Id", <#= parentEntity.Name.ToLower() #>_id);
+        }
+
+<#+ 
+		}
+ #>
+
+        /// <summary>
+        /// Determines if mapping already exists for a given <#= parentEntity.ClassName #>
+        /// </summary>        
+        /// <returns></returns>
+        public static bool MapTo<#= parentEntity.ClassName  #>AlreadyExists(int <#= parentEntity.ClassName.ToLower() #>_id, int <#= childEntity.ClassName.ToLower() #>_id)
+        {
+            return Get<#= parentEntity.ClassName #>Map(<#= parentEntity.ClassName.ToLower() #>_id, <#= childEntity.ClassName.ToLower() #>_id) != null ? true : false;
+        }
+
+		/// <summary>
+        /// Gets the mapping for a given <#= parentEntity.ClassName #>
+        /// </summary>
+        /// <param name="applicationcomponent_id"></param>
+        /// <param name="project_id"></param>
+        /// <returns></returns>
+        public static <#= mappingEntity.DataSource.GeneratedNamespace #>.Entities.<#= mappingEntity.ClassName #> Get<#= parentEntity.ClassName #>Map(int <#= parentEntity.ClassName.ToLower() #>_id, int <#= childEntity.ClassName.ToLower() #>_id)
+        { 
+            DataAccess.<#= mappingEntity.ClassName #>QueryBuilder query = new DataAccess.<#= mappingEntity.ClassName #>QueryBuilder();
+
+            query.Where(<#= mappingEntity.PluralClassName #>Schema.Columns.<#= parentEntity.ClassName #>_Id).IsEqualTo(<#= parentEntity.ClassName.ToLower() #>_id);
+            query.Where(<#= mappingEntity.PluralClassName #>Schema.Columns.<#= childEntity.ClassName #>_Id).IsEqualTo(<#= childEntity.ClassName.ToLower() #>_id);
+
+<#+
+			if(mappingEntity.SupportsLogicalDeletion)
+            {
+#>
+			query.Where(<#= mappingEntity.PluralClassName #>Schema.Columns.<#= Constants.AUDIT_LOGICDELETION_FIELDNAME #>).IsEqualTo(1);
+<#+ 
+            }
+ #>
+
+            return query.FetchSingle();
+        }
+
+
+        /// <summary>
+        /// Maps a list of [Organization] to user
+        /// </summary>
+        /// <param name="parentId"></param>
+        /// <param name="selectedItems"></param>
+        public static void MapTo<#= parentEntity.ClassName #>(int parentId, List<int> selectedItems)
+        {
+            if (selectedItems.Count == 0)
+            {
+                throw new Exception(AppSimplicity.ActiveRecord.Messages.NO_SELECTION_EXCEPTION);
+            }
+
+            foreach (int itemId in selectedItems)
+            {
+                if (MapTo<#= parentEntity.ClassName #>AlreadyExists(parentId, itemId))
+                {
+                    throw new Exception(string.Format(
+                        AppSimplicity.ActiveRecord.Messages.RECORD_ALREADY_MAPPED,
+                        DataAccess.<#= childEntity.PluralClassName #>.FetchById(itemId).<#= childEntityDescCol.PropertyName #>));
+                }
+            }
+
+            foreach (int itemId in selectedItems)
+            {
+                <#= mappingEntity.PluralClassName #>.Create(new Entities.<#= mappingEntity.ClassName #>()
+                {
+                    <#= parentEntity.Name #>_Id = parentId,
+                    <#= childEntity.Name #>_Id = itemId
+                });
+            }
+        }
+
+        public static void MapTo<#= parentEntity.ClassName #>(int <#= parentEntity.Name.ToLower() #>_id, int <#= childEntity.Name.ToLower() #>_id)
+        {
+            MapTo<#= parentEntity.ClassName #>(<#= parentEntity.Name.ToLower() #>_id, new List<int>() { <#= childEntity.Name.ToLower() #>_id });
+        }
+
+        /// <summary>
+        /// Deletes all the mappings that fill the mapping criteria.
+        /// </summary>
+        /// <param name="parentId"></param>
+        /// <param name="selectedItems"></param>
+        public static void Delete<#= parentEntity.ClassName #>Mapping(int parentId, List<int> selectedItems)
+        {
+            Entities.<#= mappingEntity.ClassName #> map;
+            foreach (int itemId in selectedItems)
+            {                
+				map = Get<#= parentEntity.ClassName #>Map(parentId, itemId);
+                if (map != null)
+                {
+                    DataAccess.<#= mappingEntity.PluralClassName #>.Delete(map);
+                }
+            }
+        }
+
+        #endregion
+<#+ 
+	}
+ #>
+
+
+
+<#+ public void GenerateReportClass(StoredProcedure sp)
+{ 
+	Dictionary<string, string> ConversionMapping = new Dictionary<string, string>()
+    {
+        {"string", "StringValue"},
+        {"int", "Int32"},
+        {"DateTime", "DateTime"},
+        {"Decimal", "Decimal"},
+        {"long", "Int64"},
+        {"bool", "Boolean"}
+	};
+
+	string className = sp.Name.Substring(Constants.CUSTOM_WRITTEN_REPORT_PREFIX.Length).Split('_')[0];
+	string reportName = sp.Name.Substring(Constants.CUSTOM_WRITTEN_REPORT_PREFIX.Length).Split('_')[1];
+
+	PropertyTypeMapping mapping = null;
+
+#>
+
+#region <#= reportName #>
+
+
+	public partial class <#= className #> : IActiveRecord
+	{
+<#+ 
+
+	foreach (Column col in sp.ReturnedColumns) // render all columns
+	{
+		string TargetType = "undefined";
+		PropertyTypeMapping mappingType;
+
+		if (typeMappingsCSharp.ContainsKey(col.SQLType)) 
+		{
+			bool useNullableMark = false;
+			mappingType = typeMappingsCSharp[col.SQLType];
+		
+			if (col.IsNullable) 
+			{
+				if (mappingType.IsCLRNullable)
+				{
+					useNullableMark = true;
+				}
+			}		 
+        
+			if (mappingType.MappingType.ToLower() == "datetime")
+			{
+				useNullableMark = true;
+			}
+
+			TargetType = useNullableMark ? string.Format("{0} ?", typeMappingsCSharp[col.SQLType].MappingType) : typeMappingsCSharp[col.SQLType].MappingType;       
+		}
+       
+    #>	
+		/// <summary>
+		/// <#=col.Summary #>
+		/// </summary>
+	    public <#= TargetType #> <#=col.PropertyName #> { get; set; } // <#= col.SQLType #>
+<#+ 
+	} // end of for column 
+    
+#>
+
+		public bool Selected { get; set; }	
+	}
+
+	public class <#= className #>Factory : AppSimplicity.ActiveRecord.DataAccess.BaseEntityFactory<Reports.<#= className #>>
+    {
+        protected override Reports.<#= className #> LoadEntity(System.Data.Common.DbDataReader reader)
+        {
+            Reports.<#= className #> item = new <#= className #>();
+
+<#+ 
+		List<string> spRetCols = new List<string>();	
+		string convertTo = "Undefined";
+
+		foreach(Column retCol in sp.ReturnedColumns)
+        {			
+			convertTo = "Undefined";
+			mapping = typeMappingsCSharp[retCol.SQLType];
+
+			if (retCol.IsNullable)
+            {
+				if (mapping.IsCLRNullable)
+				{
+					convertTo = string.Format ("{0}Nullable", ConversionMapping[mapping.MappingType]);
+				}
+				else 
+				{
+					convertTo = ConversionMapping[mapping.MappingType];
+				}
+			}
+			else 
+			{
+				convertTo = ConversionMapping[mapping.MappingType];
+            }
+
+			spRetCols.Add(string.Format(@"            item.{0} = this.Map.To{1}(reader[""{2}""]);", retCol.PropertyName, convertTo, retCol.ColumnName));
+        }
+  #>
+
+<#= string.Join(" " + Environment.NewLine, spRetCols.ToArray()) #>
+			
+            return item;
+        }
+
+        public <#= className #>Factory() : base(DataAccess.DataContext.CONNECTION_NAME) { }
+    }
+
+    public partial class <#= reportName #>
+    {
+        public partial class FilterSettings : AppSimplicity.ActiveRecord.DataAccess.BaseEntityFilterSettings 
+        {
+<#+ 
+
+	List<string> spParameters = new List<string>();		
+	List<string> spAddParameters = new List<string>();		
+
+
+	foreach(StoredProcedureParameter param in sp.Parameters)
+    {
+		mapping = typeMappingsCSharp[param.SQLType];
+
+		if(mapping.IsDate) 
+		{
+			spAddParameters.Add(
+				string.Format(@"                this.AddParameter(""{0}"", {1}.HasValue ? {1}.Value : (object)DBNull.Value);", param.ParameterName, param.PropertyName));	
+			
+			spParameters.Add(
+				string.Format("            public {0}? {1} {{ get; set; }}", mapping.MappingType, param.PropertyName));
+		}
+		else 
+		{
+			spAddParameters.Add(
+				string.Format(@"                this.AddParameter(""{0}"", {1});", param.ParameterName, param.PropertyName));
+			
+			spParameters.Add(
+				string.Format("            public {0} {1} {{ get; set; }}", mapping.MappingType, param.PropertyName));
+		}
+		
+	}
+
+ #>
+<#= string.Join(" " + Environment.NewLine, spParameters.ToArray()) #>
+            
+            protected override void LoadParameters()
+            {
+<#= string.Join(" " + Environment.NewLine, spAddParameters.ToArray()) #>
+            }
+
+            public FilterSettings() : base (DataAccess.DataContext.CONNECTION_NAME)
+            {
+
+            }
+        }
+
+        /// <summary>
+        /// Loads a list of Reports.TestCase
+        /// </summary>
+        /// <param name="settings">The filter parameters </param>
+        /// <returns></returns>
+        public static List<<#= sp.DataSource.GeneratedNamespace #>.Reports.<#= className #>> LoadReport(FilterSettings settings)
+        {
+            <#= className #>Factory factory = new <#= className #>Factory();
+            return factory.FetchList("[<#= sp.SchemaName #>].[<#= sp.Name #>]", settings.GetParameters());
+        }
+    }
+
+#endregion
+
+<#+ 
+}
+#>
+
+
+

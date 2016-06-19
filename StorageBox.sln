@@ -1,0 +1,51 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25123.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{E6B40A1F-3B9A-4CB4-8556-BB6B8C239629}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{8832A7B2-C6E7-4BEC-B58C-576DE8C79044}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StorageBox", "StorageBox\StorageBox.csproj", "{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "References", "References", "{2AFA5E73-6DBA-473D-9D4A-C871AD3637CD}"
+	ProjectSection(SolutionItems) = preProject
+		References\AppSimplicity.ActiveRecord.dll = References\AppSimplicity.ActiveRecord.dll
+		References\AppSimplicity.ActiveRecord.dll.config = References\AppSimplicity.ActiveRecord.dll.config
+		References\AppSimplicity.ActiveRecord.pdb = References\AppSimplicity.ActiveRecord.pdb
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "es", "es", "{85811B66-8EF0-43A1-87B1-69A738DD43F3}"
+	ProjectSection(SolutionItems) = preProject
+		References\es\AppSimplicity.ActiveRecord.resources.dll = References\es\AppSimplicity.ActiveRecord.resources.dll
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StorageBox.API", "StorageBox.API\StorageBox.API.csproj", "{67666734-3499-4A10-9ABE-D5E8891A6E51}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Client", "Client", "{6AB30FD4-2D63-4735-9999-E693CDCF1C5A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{67666734-3499-4A10-9ABE-D5E8891A6E51}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{67666734-3499-4A10-9ABE-D5E8891A6E51}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{67666734-3499-4A10-9ABE-D5E8891A6E51}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{67666734-3499-4A10-9ABE-D5E8891A6E51}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F1BA6E2C-142B-40F0-AAB7-E859FC96D24D} = {8832A7B2-C6E7-4BEC-B58C-576DE8C79044}
+		{85811B66-8EF0-43A1-87B1-69A738DD43F3} = {2AFA5E73-6DBA-473D-9D4A-C871AD3637CD}
+		{67666734-3499-4A10-9ABE-D5E8891A6E51} = {E6B40A1F-3B9A-4CB4-8556-BB6B8C239629}
+	EndGlobalSection
+EndGlobal
