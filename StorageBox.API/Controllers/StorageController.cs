@@ -8,6 +8,43 @@ using System.Web.Http;
 namespace StorageBox.API.Models
 {
     /// <summary>
+    /// Call object to retrieve file action
+    /// </summary>
+    public class RetrieveFileRequest
+    {
+        /// <summary>
+        /// The id of the file to be retrieved
+        /// </summary>
+        public string FileId { get; set; }
+    }
+
+    /// <summary>
+    /// Contains file information when file is retrieved
+    /// </summary>
+    public class RetrieveFileResponse : Models.ServiceResponse
+    {
+        /// <summary>
+        /// The original name of the file
+        /// </summary>
+        public string FileName { get; set; }
+
+        /// <summary>
+        /// The encoded array of bytes of the file as BASE64
+        /// </summary>
+        public string FileContent { get; set; }
+
+        /// <summary>
+        /// The suggested mime type (as in the service database).
+        /// </summary>
+        public string MimeType { get; set; }
+
+        /// <summary>
+        /// Sets or gets the extension of the instance
+        /// </summary>
+        public string Extension { get; set; }
+    }
+
+    /// <summary>
     /// 
     /// </summary>
     public class UploadFileModel : Models.ServiceRequestBaseModel
@@ -57,6 +94,33 @@ namespace StorageBox.API.Controllers
             {
                 var storageFileId = DataAccess.Files.PersistFile(this.CurrentSession, model.FileName, model.FileContent);
                 response.FileID = storageFileId;
+                response.OperationSuccesful = true;
+            }
+            catch (Exception ex)
+            {
+                response.OperationSuccesful = false;
+                response.ErrorMessage = ex.Message;
+                response.ExceptionDetails = ex.ToString();
+            }
+
+            return response;
+        }
+
+        /// <summary>
+        /// Given a valid FileID, retrieves the content of the file.
+        /// </summary>
+        /// <param name="model"></param>
+        /// <returns></returns>
+        [Route("RetrieveFile"), HttpPost]
+        public Models.RetrieveFileResponse RetrieveFile(Models.RetrieveFileRequest model)
+        {
+            var response = new Models.RetrieveFileResponse();
+
+            try
+            {
+                var file = DataAccess.Files.RetrieveFile(this.CurrentSession, model.FileId);
+                response.FileName = file.FileName;
+                response.FileContent = file.FileContent;
                 response.OperationSuccesful = true;
             }
             catch (Exception ex)

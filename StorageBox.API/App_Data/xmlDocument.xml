@@ -526,6 +526,13 @@
             <param name="model"></param>
             <returns></returns>
         </member>
+        <member name="M:StorageBox.API.Controllers.StorageController.RetrieveFile(StorageBox.API.Models.RetrieveFileRequest)">
+            <summary>
+            Given a valid FileID, retrieves the content of the file.
+            </summary>
+            <param name="model"></param>
+            <returns></returns>
+        </member>
         <member name="T:StorageBox.API.Models.AuthenticationModel">
             <summary>
             This model must be specified when authentication is requested
@@ -595,6 +602,41 @@
         <member name="T:StorageBox.API.Models.ServiceRequestBaseModel">
             <summary>
             All models should be implemented from this class
+            </summary>
+        </member>
+        <member name="T:StorageBox.API.Models.RetrieveFileRequest">
+            <summary>
+            Call object to retrieve file action
+            </summary>
+        </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileRequest.FileId">
+            <summary>
+            The id of the file to be retrieved
+            </summary>
+        </member>
+        <member name="T:StorageBox.API.Models.RetrieveFileResponse">
+            <summary>
+            Contains file information when file is retrieved
+            </summary>
+        </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileResponse.FileName">
+            <summary>
+            The original name of the file
+            </summary>
+        </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileResponse.FileContent">
+            <summary>
+            The encoded array of bytes of the file as BASE64
+            </summary>
+        </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileResponse.MimeType">
+            <summary>
+            The suggested mime type (as in the service database).
+            </summary>
+        </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileResponse.Extension">
+            <summary>
+            Sets or gets the extension of the instance
             </summary>
         </member>
         <member name="T:StorageBox.API.Models.UploadFileModel">
