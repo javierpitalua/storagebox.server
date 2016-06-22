@@ -11,6 +11,7 @@ namespace StorageBox.DataAccess
         public string FileName { get; set; }
         public string FileContent { get; set; }
         public string MimeType { get; set; }
+        public string Extension { get; set; }
     }
 
     public class Files
@@ -35,7 +36,8 @@ namespace StorageBox.DataAccess
                     {
                         FileName = System.IO.Path.GetFileName(storageFile.FileName),
                         FileContent = storageFile.LoadFileContentAsBASE64(),
-                        MimeType = storageFile.GetMimeType()
+                        MimeType = storageFile.GetMimeType(),
+                        Extension = storageFile.Extension
                     };
                 }
                 else

@@ -619,6 +619,11 @@
             Contains file information when file is retrieved
             </summary>
         </member>
+        <member name="P:StorageBox.API.Models.RetrieveFileResponse.FileID">
+            <summary>
+            The id of the file
+            </summary>
+        </member>
         <member name="P:StorageBox.API.Models.RetrieveFileResponse.FileName">
             <summary>
             The original name of the file

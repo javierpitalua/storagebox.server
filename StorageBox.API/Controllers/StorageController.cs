@@ -24,6 +24,11 @@ namespace StorageBox.API.Models
     public class RetrieveFileResponse : Models.ServiceResponse
     {
         /// <summary>
+        /// The id of the file
+        /// </summary>
+        public string FileID { get; set; }
+
+        /// <summary>
         /// The original name of the file
         /// </summary>
         public string FileName { get; set; }
@@ -119,8 +124,11 @@ namespace StorageBox.API.Controllers
             try
             {
                 var file = DataAccess.Files.RetrieveFile(this.CurrentSession, model.FileId);
+                response.FileID = model.FileId;
                 response.FileName = file.FileName;
                 response.FileContent = file.FileContent;
+                response.MimeType = file.MimeType;
+                response.Extension = file.Extension;
                 response.OperationSuccesful = true;
             }
             catch (Exception ex)
